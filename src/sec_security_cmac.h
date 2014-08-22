@@ -14,9 +14,8 @@
  * limitations under the License.
  */
 
-
-src/sec_security_cmac.h and src/sec_security_cmac.c include additional
-license terms:
+/* The source in this file has been adapted and modified from the 
+crypto/cmac/cmac.h */
 
 /* Written by Dr Stephen N Henson (steve@openssl.org) for the OpenSSL
  * project.
@@ -70,3 +69,58 @@ license terms:
  * ====================================================================
  */
 
+
+#ifndef HEADER_CMAC_H
+#define HEADER_CMAC_H
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include <openssl/evp.h>
+
+/* Opaque */
+typedef struct CMAC_CTX_st CMAC_CTX;
+
+struct CMAC_CTX_st
+    {
+    /* Cipher context to use */
+    EVP_CIPHER_CTX cctx;
+    /* Keys k1 and k2 */
+    unsigned char k1[EVP_MAX_BLOCK_LENGTH];
+    unsigned char k2[EVP_MAX_BLOCK_LENGTH];
+    /* Temporary block */
+    unsigned char tbl[EVP_MAX_BLOCK_LENGTH];
+    /* Last (possibly partial) block */
+    unsigned char last_block[EVP_MAX_BLOCK_LENGTH];
+    /* Number of bytes in last block: -1 means context not initialised */
+    int nlast_block;
+    };
+
+/* Comcast: Removed
+CMAC_CTX *CMAC_CTX_new(void);
+*/
+
+/* Comcast: Added */
+void CMAC_CTX_init(CMAC_CTX *ctx);
+/* End of Comcast: Added */
+
+void CMAC_CTX_cleanup(CMAC_CTX *ctx);
+/* Comcast: Removed
+void CMAC_CTX_free(CMAC_CTX *ctx);
+*/
+EVP_CIPHER_CTX *CMAC_CTX_get0_cipher_ctx(CMAC_CTX *ctx);
+/* Comcast: Removed
+int CMAC_CTX_copy(CMAC_CTX *out, const CMAC_CTX *in);
+ */
+
+int CMAC_Init(CMAC_CTX *ctx, const void *key, size_t keylen,
+			const EVP_CIPHER *cipher, ENGINE *impl);
+int CMAC_Update(CMAC_CTX *ctx, const void *data, size_t dlen);
+int CMAC_Final(CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen);
+int CMAC_resume(CMAC_CTX *ctx);
+
+#ifdef  __cplusplus
+}
+#endif
+#endif

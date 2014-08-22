@@ -1,0 +1,10 @@
+Run autogen.sh first:
+# ./autogen.sh
+
+Then ./configure
+# ./confgure
+
+Now you can run make
+# ./make
+
+
