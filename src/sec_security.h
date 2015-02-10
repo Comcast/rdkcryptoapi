@@ -34,8 +34,10 @@
 /*****************************************************************************
  * STANDARD INCLUDE FILES
  *****************************************************************************/
+#define __STDC_FORMAT_MACROS
 #include <stdint.h>
 #include <stdio.h>
+#include <inttypes.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -208,15 +210,15 @@ extern "C"
 #define SEC_FKPSTYPE_HASHLOCKED 0x07
 #define SEC_FKPSTYPE_RESERVED 0xFF
 
-#define SEC_OBJECTID_PATTERN "%016llx"
+#define SEC_OBJECTID_PATTERN "%"PRId64""
 #define SEC_KEY_FILENAME_EXT ".key"
-#define SEC_KEY_FILENAME_PATTERN "%016llx.key"
-#define SEC_KEYINFO_FILENAME_PATTERN "%016llx.keyinfo"
+#define SEC_KEY_FILENAME_PATTERN "%"PRId64".key"
+#define SEC_KEYINFO_FILENAME_PATTERN "%"PRId64".keyinfo"
 #define SEC_CERT_FILENAME_EXT ".cert"
-#define SEC_CERT_FILENAME_PATTERN "%016llx.cert"
-#define SEC_CERTINFO_FILENAME_PATTERN "%016llx.certinfo"
+#define SEC_CERT_FILENAME_PATTERN "%"PRId64".cert"
+#define SEC_CERTINFO_FILENAME_PATTERN "%"PRId64".certinfo"
 #define SEC_BUNDLE_FILENAME_EXT ".bin"
-#define SEC_BUNDLE_FILENAME_PATTERN "%016llx.bin"
+#define SEC_BUNDLE_FILENAME_PATTERN "%"PRId64".bin"
 
 #define SEC_BUNDLE_MAX_LEN 128*1024
 #define SEC_CERT_MAX_DATA_LEN (1024 * 64)
