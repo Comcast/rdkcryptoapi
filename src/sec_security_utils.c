@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2014 Comcast Cable Communications Management, LLC
  *
@@ -19,257 +20,24 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <zlib.h>
-#include <openssl/err.h>
-#include <openssl/engine.h>
 #include <dirent.h>
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
-static SEC_BOOL g_sec_openssl_inited = 0;
-
-static int _Sec_OpenSSLPrivSign(int type, const unsigned char *m, unsigned int m_len,
-    unsigned char *sigret, unsigned int *siglen, const RSA *rsa)
-{
-    Sec_KeyHandle *key = NULL;
-    Sec_SignatureAlgorithm alg;
-    int ret = -1;
-
-    switch (type)
-    {
-        case NID_sha1:
-            alg = SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST;
-            break;
-        case NID_sha256:
-            alg = SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST;
-            break;
-        default:
-            SEC_LOG_ERROR("Unknown type %d", type);
-            goto cleanup;
-            break;
-    }
-
-    key = (Sec_KeyHandle *) RSA_get_app_data(rsa);
-    if (NULL == key)
-    {
-        SEC_LOG_ERROR("NULL key encountered");
-        goto cleanup;
-    }
-
-    if (SEC_RESULT_SUCCESS != SecSignature_SingleInput(SecKey_GetProcessor(key),
-            alg, SEC_SIGNATUREMODE_SIGN, key, (SEC_BYTE*) m, m_len,
-            (SEC_BYTE*) sigret, siglen))
-    {
-        SEC_LOG_ERROR("SecSignature_SingleInput failed");
-        goto cleanup;
-    }
-
-    ret = 1;
-cleanup:
-    return ret;
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x00909000L
-static int _Sec_OpenSSLPubVerify(int type, const unsigned char *m, unsigned int m_len,
-    unsigned char *sigret, unsigned int siglen, const RSA *rsa)
-#else
-static int _Sec_OpenSSLPubVerify(int type, const unsigned char *m, unsigned int m_len,
-    const unsigned char *sigret, unsigned int siglen, const RSA *rsa)
-#endif
-{
-    Sec_KeyHandle *key = NULL;
-    Sec_SignatureAlgorithm alg;
-    int ret = -1;
-
-    switch (type)
-    {
-        case NID_sha1:
-            alg = SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST;
-            break;
-        case NID_sha256:
-            alg = SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST;
-            break;
-        default:
-            SEC_LOG_ERROR("Unknown type %d", type);
-            goto cleanup;
-            break;
-    }
-
-    key = (Sec_KeyHandle *) RSA_get_app_data(rsa);
-    if (NULL == key)
-    {
-        SEC_LOG_ERROR("NULL key encountered");
-        goto cleanup;
-    }
-
-    if (SEC_RESULT_SUCCESS != SecSignature_SingleInput(SecKey_GetProcessor(key),
-            alg, SEC_SIGNATUREMODE_VERIFY, key, (SEC_BYTE*) m, m_len,
-            (SEC_BYTE*) sigret, &siglen))
-    {
-        SEC_LOG_ERROR("SecSignature_SingleInput failed");
-        goto cleanup;
-    }
-
-    ret = 1;
-cleanup:
-    return ret;
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x00909000L
-static int _Sec_OpenSSLPubEncrypt(int flen, const unsigned char *from,
-        unsigned char *to, RSA *rsa, int padding)
-#else
-static int _Sec_OpenSSLPubEncrypt(int flen, const unsigned char *from,
-        unsigned char *to, RSA *rsa, int padding)
-#endif
-{
-    Sec_KeyHandle *key = NULL;
-    Sec_CipherAlgorithm alg;
-    SEC_SIZE written;
-    int ret = -1;
-
-    switch (padding)
-    {
-        case RSA_PKCS1_PADDING:
-            alg = SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING;
-            break;
-        case RSA_PKCS1_OAEP_PADDING:
-            alg = SEC_CIPHERALGORITHM_RSA_OAEP_PADDING;
-            break;
-        default:
-            SEC_LOG_ERROR("Unknown padding %d", padding);
-            goto cleanup;
-            break;
-    }
-
-    key = (Sec_KeyHandle *) RSA_get_app_data(rsa);
-    if (NULL == key)
-    {
-        SEC_LOG_ERROR("NULL key encountered");
-        goto cleanup;
-    }
-
-    if (SEC_RESULT_SUCCESS != SecCipher_SingleInput(SecKey_GetProcessor(key),
-            alg, SEC_CIPHERMODE_ENCRYPT, key, NULL,
-            (SEC_BYTE*) from, flen, (SEC_BYTE*) to, SecKey_GetKeyLen(key), &written))
-    {
-        SEC_LOG_ERROR("SecSignature_SingleInput failed");
-        goto cleanup;
-    }
-
-    ret = written;
-cleanup:
-    return ret;
-}
-
-#if OPENSSL_VERSION_NUMBER < 0x00909000L
-static int _Sec_OpenSSLPrivDecrypt(int flen, const unsigned char *from,
-        unsigned char *to, RSA *rsa, int padding)
-#else
-static int _Sec_OpenSSLPrivDecrypt(int flen, const unsigned char *from,
-        unsigned char *to, RSA *rsa, int padding)
-#endif
-{
-    Sec_KeyHandle *key = NULL;
-    Sec_CipherAlgorithm alg;
-    SEC_SIZE written;
-    int ret = -1;
-
-    switch (padding)
-    {
-        case RSA_PKCS1_PADDING:
-            alg = SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING;
-            break;
-        case RSA_PKCS1_OAEP_PADDING:
-            alg = SEC_CIPHERALGORITHM_RSA_OAEP_PADDING;
-            break;
-        default:
-            SEC_LOG_ERROR("Unknown padding %d", padding);
-            goto cleanup;
-            break;
-    }
-
-    key = (Sec_KeyHandle *) RSA_get_app_data(rsa);
-    if (NULL == key)
-    {
-        SEC_LOG_ERROR("NULL key encountered");
-        goto cleanup;
-    }
-
-    if (SEC_RESULT_SUCCESS != SecCipher_SingleInput(SecKey_GetProcessor(key),
-            alg, SEC_CIPHERMODE_DECRYPT, key, NULL,
-            (SEC_BYTE*) from, flen, (SEC_BYTE*) to, SecKey_GetKeyLen(key), &written))
-    {
-        SEC_LOG_ERROR("SecSignature_SingleInput failed");
-        goto cleanup;
-    }
-
-    ret = written;
-cleanup:
-    return ret;
-}
-
-static RSA_METHOD g_sec_openssl_rsamethod = {
-        "securityapi RSA method",
-        _Sec_OpenSSLPubEncrypt,  /* rsa_pub_enc */
-        NULL,  /* rsa_pub_dec */
-        NULL, /* rsa_priv_enc */
-        _Sec_OpenSSLPrivDecrypt, /* rsa_priv_dec */
-        NULL,  /* rsa_mod_exp */
-        NULL,  /* bn_mod_exp */
-        NULL,  /* init */
-        NULL,  /* finish */
-        RSA_METHOD_FLAG_NO_CHECK | RSA_FLAG_EXT_PKEY | RSA_FLAG_SIGN_VER,  /* flags */
-        NULL,  /* app_data */
-        _Sec_OpenSSLPrivSign,  /* rsa_sign */
-        _Sec_OpenSSLPubVerify,  /* rsa_verify */
-        NULL,  /* rsa_keygen */
-};
-
-void ENGINE_load_securityapi(void)
-{
-    ENGINE *engine = ENGINE_new();
-
-    if (engine == NULL )
-    {
-        SEC_LOG_ERROR("ENGINE_new failed");
-        return;
-    }
-
-    if (!ENGINE_set_id(engine, "securityapi")
-            || !ENGINE_set_name(engine, "SecurityApi engine")
-            || !ENGINE_set_RSA(engine, &g_sec_openssl_rsamethod)
-            )
-    {
-        ENGINE_free(engine);
-        return;
-    }
-
-    ENGINE_add(engine);
-    ENGINE_free(engine);
-    ERR_clear_error();
-}
-
-void SecUtils_InitOpenSSL(void)
-{
-    if (!g_sec_openssl_inited)
-    {
-        ERR_load_crypto_strings();
-        ERR_load_crypto_strings();
-        OpenSSL_add_all_algorithms();
-        OpenSSL_add_all_ciphers();
-        OpenSSL_add_all_digests();
-
-        ENGINE_load_securityapi();
-
-        g_sec_openssl_inited = 1;
-    }
-}
+#include <openssl/err.h>
+#include <openssl/engine.h>
+#include <openssl/evp.h>
+#include <openssl/sha.h>
+#include <openssl/hmac.h>
+#include <openssl/rand.h>
+#include <openssl/pem.h>
+#include <openssl/rsa.h>
+#include <openssl/aes.h>
 
 Sec_Result SecUtils_FillKeyStoreUserHeader(Sec_ProcessorHandle *proc, SecUtils_KeyStoreHeader *header, Sec_KeyContainer container)
 {
-    SecUtils_Memset(header, 0, sizeof(SecUtils_KeyStoreHeader));
+    Sec_Memset(header, 0, sizeof(SecUtils_KeyStoreHeader));
 
     if (SEC_RESULT_SUCCESS != SecProcessor_GetDeviceId(proc, header->device_id))
     {
@@ -292,7 +60,7 @@ Sec_Result SecUtils_ValidateKeyStore(Sec_ProcessorHandle *proc, SEC_BOOL require
     SecUtils_KeyStoreHeader header;
     SEC_BYTE device_id[SEC_DEVICEID_LEN];
 
-    SecUtils_Memset(&header, 0, sizeof(header));
+    Sec_Memset(&header, 0, sizeof(header));
 
     if (store_len < sizeof(SecStore_Header) || store_len < SecStore_GetStoreLen(store))
     {
@@ -323,102 +91,6 @@ Sec_Result SecUtils_ValidateKeyStore(Sec_ProcessorHandle *proc, SEC_BOOL require
         SEC_LOG_ERROR("device_id does not match the key store");
         return SEC_RESULT_FAILURE;
     }
-
-    return SEC_RESULT_SUCCESS;
-}
-
-RSA* SecUtils_KeyToEngineRSA(Sec_KeyHandle *key)
-{
-    Sec_RSARawPublicKey pubKey;
-    RSA *rsa = NULL;
-    ENGINE* engine = NULL;
-
-    engine = ENGINE_by_id("securityapi");
-    if (NULL == engine)
-    {
-        SEC_LOG_ERROR("ENGINE_by_id failed");
-        return NULL;
-    }
-
-    if (SEC_RESULT_SUCCESS != SecKey_ExtractPublicKey(key, &pubKey))
-    {
-        SEC_LOG_ERROR("SecKey_ExtractPublicKey failed");
-        return NULL;
-    }
-
-    rsa = RSA_new_method(engine);
-    if (NULL == rsa)
-    {
-        SEC_LOG_ERROR("RSA_new_method failed");
-        return NULL;
-    }
-
-    rsa->n = BN_bin2bn(pubKey.n, SecUtils_BEBytesToUint32(pubKey.modulus_len_be), NULL);
-    rsa->e = BN_bin2bn(pubKey.e, 4, NULL);
-
-    RSA_set_app_data(rsa, key);
-
-    return rsa;
-}
-
-X509* SecUtils_CertificateToX509(Sec_CertificateHandle *cert)
-{
-    SEC_BYTE exportedCert[1024*64];
-    SEC_SIZE exportedCertLen;
-
-    if (SEC_RESULT_SUCCESS != SecCertificate_Export(cert, exportedCert, sizeof(exportedCert), &exportedCertLen))
-    {
-        SEC_LOG_ERROR("SecCertificate_Export failed");
-        return NULL;
-    }
-
-    return SecUtils_DerToX509(exportedCert, exportedCertLen);
-}
-
-int SecUtils_Memcmp(void* ptr1, void* ptr2, const size_t num)
-{
-    size_t i;
-    SEC_BYTE result = 0;
-    SEC_BYTE* a = (SEC_BYTE*) ptr1;
-    SEC_BYTE* b = (SEC_BYTE*) ptr2;
-
-    for (i=0; i<num; ++i)
-    {
-        result |= a[i] ^ b[i];
-    }
-
-    return result;
-}
-
-void *SecUtils_Memset(void *ptr, int value, size_t num)
-{
-    volatile SEC_BYTE *p = ptr;
-    while (num--)
-        *p++ = value;
-    return ptr;
-}
-
-void SecUtils_BufferInit(Sec_Buffer *buffer, void *mem, SEC_SIZE len)
-{
-    buffer->base = mem;
-    buffer->size = len;
-    buffer->written = 0;
-}
-
-void SecUtils_BufferReset(Sec_Buffer *buffer)
-{
-    buffer->written = 0;
-}
-
-Sec_Result SecUtils_BufferWrite(Sec_Buffer *buffer, void *data, SEC_SIZE len)
-{
-    int space_left = buffer->size - buffer->written;
-
-    if (space_left < 0 || (SEC_SIZE) space_left < len)
-        return SEC_RESULT_BUFFER_TOO_SMALL;
-
-    memcpy(buffer->base + buffer->written, data, len);
-    buffer->written += len;
 
     return SEC_RESULT_SUCCESS;
 }
@@ -463,7 +135,8 @@ Sec_Result SecUtils_ReadFile(const char *path, void *data, SEC_SIZE data_len,
 
     sec_res = SEC_RESULT_SUCCESS;
 
-    cleanup: if (f != NULL)
+cleanup:
+    if (f != NULL)
     {
         fclose(f);
         f = NULL;
@@ -494,9 +167,14 @@ Sec_Result SecUtils_WriteFile(const char *path, void *data, SEC_SIZE data_len)
 
     sec_res = SEC_RESULT_SUCCESS;
 
-    cleanup: if (f != NULL)
+cleanup:
+    if (f != NULL)
     {
-        fclose(f);
+        if (0 != fclose(f))
+        {
+            SEC_LOG_ERROR("fclose failed");
+            sec_res = SEC_RESULT_FAILURE;
+        }
         f = NULL;
     }
 
@@ -542,7 +220,7 @@ Sec_Result SecUtils_MkDir(const char *path)
         return SEC_RESULT_FAILURE;
     }
 
-    return SEC_RESULT_FAILURE;
+    return SEC_RESULT_SUCCESS;
 }
 
 Sec_Result SecUtils_RmFile(const char *path)
@@ -608,35 +286,6 @@ SEC_BOOL SecUtils_FileExists(const char *path)
     return 1;
 }
 
-Sec_KeyContainer SecUtils_RawContainer(Sec_KeyType key_type)
-{
-    switch (key_type)
-    {
-        case SEC_KEYTYPE_AES_128:
-            return SEC_KEYCONTAINER_RAW_AES_128;
-        case SEC_KEYTYPE_AES_256:
-            return SEC_KEYCONTAINER_RAW_AES_256;
-        case SEC_KEYTYPE_HMAC_128:
-            return SEC_KEYCONTAINER_RAW_HMAC_128;
-        case SEC_KEYTYPE_HMAC_160:
-            return SEC_KEYCONTAINER_RAW_HMAC_160;
-        case SEC_KEYTYPE_HMAC_256:
-            return SEC_KEYCONTAINER_RAW_HMAC_256;
-        case SEC_KEYTYPE_RSA_1024:
-            return SEC_KEYCONTAINER_RAW_RSA_1024;
-        case SEC_KEYTYPE_RSA_2048:
-            return SEC_KEYCONTAINER_RAW_RSA_2048;
-        case SEC_KEYTYPE_RSA_1024_PUBLIC:
-            return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
-        case SEC_KEYTYPE_RSA_2048_PUBLIC:
-            return SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC;
-        default:
-            break;
-    }
-
-    return SEC_KEYCONTAINER_NUM;
-}
-
 void SecUtils_BigNumToBuffer(BIGNUM *bignum, SEC_BYTE *buffer,
         SEC_SIZE buffer_len)
 {
@@ -662,9 +311,45 @@ RSA *SecUtils_RSAFromPrivBinary(Sec_RSARawPrivateKey *binary)
         SEC_LOG_ERROR("RSA_new failed");
         return NULL;
     }
-    rsa->n = BN_bin2bn(binary->n, SecUtils_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->n = BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
     rsa->e = BN_bin2bn(binary->e, 4, NULL);
-    rsa->d = BN_bin2bn(binary->d, SecUtils_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->d = BN_bin2bn(binary->d, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
+
+    return rsa;
+}
+
+RSA *SecUtils_RSAFromPrivFullBinary(Sec_RSARawPrivateFullKey *binary)
+{
+    RSA *rsa = NULL;
+    BN_CTX *ctx = NULL;
+    BIGNUM *tmp = NULL;
+
+    rsa = RSA_new();
+    if (NULL == rsa)
+    {
+        SEC_LOG_ERROR("RSA_new failed");
+        return NULL;
+    }
+    rsa->n = BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->e = BN_bin2bn(binary->e, 4, NULL);
+    rsa->d = BN_bin2bn(binary->d, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->p = BN_bin2bn(binary->p, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->q = BN_bin2bn(binary->q, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
+
+    rsa->dmp1 = BN_new();
+    rsa->dmq1 = BN_new();
+    rsa->iqmp = BN_new();
+    tmp = BN_new();
+
+    ctx = BN_CTX_new();
+    BN_sub(tmp, rsa->p, BN_value_one());
+    BN_mod(rsa->dmp1, rsa->d, tmp, ctx);
+    BN_sub(tmp, rsa->q, BN_value_one());
+    BN_mod(rsa->dmq1, rsa->d, tmp, ctx);
+    BN_mod_inverse(rsa->iqmp, rsa->q, rsa->p, ctx);
+
+    BN_free(tmp);
+    BN_CTX_free(ctx);
 
     return rsa;
 }
@@ -679,25 +364,438 @@ RSA *SecUtils_RSAFromPubBinary(Sec_RSARawPublicKey *binary)
         SEC_LOG_ERROR("RSA_new failed");
         return NULL;
     }
-    rsa->n = BN_bin2bn(binary->n, SecUtils_BEBytesToUint32(binary->modulus_len_be), NULL);
+    rsa->n = BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
     rsa->e = BN_bin2bn(binary->e, 4, NULL);
+
+    return rsa;
+}
+
+RSA *SecUtils_RSAFromDERPriv(SEC_BYTE *der, SEC_SIZE der_len)
+{
+    const unsigned char *p = (const unsigned char *) der;
+    PKCS8_PRIV_KEY_INFO *p8 = NULL;
+    EVP_PKEY *evp_key = NULL;
+    RSA *rsa = NULL;
+
+    p8 = d2i_PKCS8_PRIV_KEY_INFO(NULL, &p, der_len);
+    if (p8 != NULL)
+    {
+        evp_key = EVP_PKCS82PKEY(p8);
+        if (evp_key == NULL)
+        {
+            SEC_LOG_ERROR("EVP_PKCS82PKEY failed");
+            goto done;
+        }
+    }
+    else
+    {
+        evp_key = d2i_AutoPrivateKey(NULL, &p, der_len);
+        if (evp_key == NULL)
+        {
+            SEC_LOG_ERROR("d2i_AutoPrivateKey failed");
+            goto done;
+        }
+    }
+
+    rsa = EVP_PKEY_get1_RSA(evp_key);
+    if (rsa == NULL)
+    {
+        SEC_LOG_ERROR("EVP_PKEY_get1_RSA failed");
+        goto done;
+    }
+
+done:
+    SEC_EVPPKEY_FREE(evp_key);
+
+    if (p8 != NULL)
+    {
+        PKCS8_PRIV_KEY_INFO_free(p8);
+    }
+
+    return rsa;
+}
+
+static int _Sec_DisablePassphrasePrompt(char *buf, int size, int rwflag, void *u)
+{
+    return 0;
+}
+
+RSA *SecUtils_RSAFromPEMPriv(SEC_BYTE *pem, SEC_SIZE pem_len)
+{
+    BIO *bio = NULL;
+    RSA *rsa = NULL;
+
+    bio = BIO_new_mem_buf(pem, pem_len);
+    rsa = PEM_read_bio_RSAPrivateKey(bio, &rsa, _Sec_DisablePassphrasePrompt, NULL);
+
+    if (rsa == NULL)
+    {
+        SEC_LOG_ERROR("Invalid RSA key container");
+        goto done;
+    }
+
+done:
+    SEC_BIO_FREE(bio);
+
+    return rsa;
+}
+
+RSA *SecUtils_RSAFromDERPub(SEC_BYTE *der, SEC_SIZE der_len)
+{
+    const unsigned char *p = (const unsigned char *) der;
+    RSA *rsa = NULL;
+
+    rsa = d2i_RSAPublicKey(&rsa, &p, der_len);
+
+    if (!rsa)
+    {
+        p = (const unsigned char *) der;
+        rsa = d2i_RSA_PUBKEY(&rsa, &p, der_len);
+    }
+
+    if (!rsa)
+    {
+        SEC_LOG_ERROR("Invalid RSA key container");
+        goto done;
+    }
+
+done:
+    return rsa;
+}
+
+RSA *SecUtils_RSAFromPEMPub(SEC_BYTE *pem, SEC_SIZE pem_len)
+{
+    BIO *bio = NULL;
+    RSA *rsa = NULL;
+
+    bio = BIO_new_mem_buf(pem, pem_len);
+    rsa = PEM_read_bio_RSA_PUBKEY(bio, &rsa, _Sec_DisablePassphrasePrompt, NULL);
+
+    if (rsa == NULL)
+    {
+        SEC_LOG_ERROR("Invalid RSA key container");
+        goto done;
+    }
+
+done:
+    SEC_BIO_FREE(bio);
 
     return rsa;
 }
 
 void SecUtils_RSAToPrivBinary(RSA *rsa, Sec_RSARawPrivateKey *binary)
 {
-    SecUtils_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
-    SecUtils_BigNumToBuffer(rsa->n, binary->n, SecUtils_BEBytesToUint32(binary->modulus_len_be));
+    Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
+    SecUtils_BigNumToBuffer(rsa->n, binary->n, Sec_BEBytesToUint32(binary->modulus_len_be));
     SecUtils_BigNumToBuffer(rsa->e, binary->e, 4);
-    SecUtils_BigNumToBuffer(rsa->d, binary->d, SecUtils_BEBytesToUint32(binary->modulus_len_be));
+    SecUtils_BigNumToBuffer(rsa->d, binary->d, Sec_BEBytesToUint32(binary->modulus_len_be));
+}
+
+void SecUtils_RSAToPrivFullBinary(RSA *rsa, Sec_RSARawPrivateFullKey *binary)
+{
+    Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
+    SecUtils_BigNumToBuffer(rsa->n, binary->n, Sec_BEBytesToUint32(binary->modulus_len_be));
+    SecUtils_BigNumToBuffer(rsa->e, binary->e, 4);
+    SecUtils_BigNumToBuffer(rsa->d, binary->d, Sec_BEBytesToUint32(binary->modulus_len_be));
+    SecUtils_BigNumToBuffer(rsa->p, binary->p, Sec_BEBytesToUint32(binary->modulus_len_be));
+    SecUtils_BigNumToBuffer(rsa->q, binary->q, Sec_BEBytesToUint32(binary->modulus_len_be));
 }
 
 void SecUtils_RSAToPubBinary(RSA *rsa, Sec_RSARawPublicKey *binary)
 {
-    SecUtils_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
-    SecUtils_BigNumToBuffer(rsa->n, binary->n, SecUtils_BEBytesToUint32(binary->modulus_len_be));
+    Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
+    SecUtils_BigNumToBuffer(rsa->n, binary->n, Sec_BEBytesToUint32(binary->modulus_len_be));
     SecUtils_BigNumToBuffer(rsa->e, binary->e, 4);
+}
+
+Sec_Result SecUtils_PKEYToDERPriv(EVP_PKEY *evp_key, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    BIO *bio = NULL;
+    BUF_MEM *bptr = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    bio = BIO_new(BIO_s_mem());
+    if (bio == NULL)
+    {
+        SEC_LOG_ERROR("BIO_new(BIO_s_mem()) failed");
+        goto done;
+    }
+
+    if (!i2d_PrivateKey_bio(bio, evp_key))
+    {
+        SEC_LOG_ERROR("i2d_PrivateKey_bio failed");
+        goto done;
+    }
+
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bptr);
+
+    *written = bptr->length;
+
+    if (output != NULL)
+    {
+        if (out_len < bptr->length)
+        {
+            SEC_LOG_ERROR("output buffer is not large enough");
+            goto done;
+        }
+        memcpy(output, bptr->data, bptr->length);
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SEC_BIO_FREE(bio);
+
+    return res;
+}
+
+Sec_Result SecUtils_RSAToDERPriv(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    EVP_PKEY *evp_key = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    evp_key = EVP_PKEY_new();
+    if (0 == EVP_PKEY_set1_RSA(evp_key, rsa))
+    {
+        SEC_LOG_ERROR("EVP_PKEY_set1_RSA failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecUtils_PKEYToDERPriv(evp_key, output, out_len, written))
+    {
+        SEC_LOG_ERROR("SecUtils_PKEYToDERPriv failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SEC_EVPPKEY_FREE(evp_key);
+
+    return res;
+}
+
+Sec_Result SecUtils_RSAToDERPrivKeyInfo(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    BIO *bio = NULL;
+    EVP_PKEY *evp_key = NULL;
+    BUF_MEM *bptr = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    evp_key = EVP_PKEY_new();
+    if (0 == EVP_PKEY_set1_RSA(evp_key, rsa))
+    {
+        SEC_LOG_ERROR("EVP_PKEY_set1_RSA failed");
+        goto done;
+    }
+
+    bio = BIO_new(BIO_s_mem());
+    if (bio == NULL)
+    {
+        SEC_LOG_ERROR("BIO_new(BIO_s_mem()) failed");
+        goto done;
+    }
+
+    if (!i2d_PKCS8PrivateKeyInfo_bio(bio, evp_key))
+    {
+        SEC_LOG_ERROR("i2d_PKCS8_PRIV_KEY_INFO_bio failed");
+        goto done;
+    }
+
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bptr);
+
+    *written = bptr->length;
+
+    if (output != NULL)
+    {
+        if (out_len < bptr->length)
+        {
+            SEC_LOG_ERROR("output buffer is not large enough");
+            goto done;
+        }
+        memcpy(output, bptr->data, bptr->length);
+
+//        SecUtils_WriteFile("/home/ccpuser/test.pkcs8", output, *written);
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SEC_EVPPKEY_FREE(evp_key);
+    SEC_BIO_FREE(bio);
+
+    return res;
+}
+
+Sec_Result SecUtils_RSAToDERPubKey(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    BIO *bio = NULL;
+    EVP_PKEY *evp_key = NULL;
+    BUF_MEM *bptr = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    evp_key = EVP_PKEY_new();
+    if (0 == EVP_PKEY_set1_RSA(evp_key, rsa))
+    {
+        SEC_LOG_ERROR("EVP_PKEY_set1_RSA failed");
+        goto done;
+    }
+
+    bio = BIO_new(BIO_s_mem());
+    if (bio == NULL)
+    {
+        SEC_LOG_ERROR("BIO_new(BIO_s_mem()) failed");
+        goto done;
+    }
+
+    if (!i2d_PUBKEY_bio(bio, evp_key))
+    {
+        SEC_LOG_ERROR("i2d_PUBKEY_bio failed");
+        goto done;
+    }
+
+    BIO_flush(bio);
+    BIO_get_mem_ptr(bio, &bptr);
+
+    *written = bptr->length;
+
+    if (output != NULL)
+    {
+        if (out_len < bptr->length)
+        {
+            SEC_LOG_ERROR("output buffer is not large enough");
+            goto done;
+        }
+        memcpy(output, bptr->data, bptr->length);
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SEC_EVPPKEY_FREE(evp_key);
+    SEC_BIO_FREE(bio);
+
+    return res;
+}
+
+SEC_BOOL SecUtils_RSAHasPriv(RSA *rsa)
+{
+    return rsa->d != NULL;
+}
+
+SEC_BOOL SecUtils_RSAIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len)
+{
+    return kc == SEC_KEYCONTAINER_DER_RSA_1024
+            || kc == SEC_KEYCONTAINER_DER_RSA_2048
+            || kc == SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC
+            || kc == SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC
+            || kc == SEC_KEYCONTAINER_RAW_RSA_1024
+            || kc == SEC_KEYCONTAINER_RAW_RSA_2048
+            || kc == SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC
+            || kc == SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC
+            || kc == SEC_KEYCONTAINER_PEM_RSA_1024
+            || kc == SEC_KEYCONTAINER_PEM_RSA_2048
+            || kc == SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC
+            || kc == SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC
+            || (kc == SEC_KEYCONTAINER_STORE
+                    && data_len >= sizeof(SecStore_Header)
+                    && data_len >= (sizeof(SecStore_Header) + SecStore_GetUserHeaderLen(data))
+                    && SecUtils_RSAIsClearKC(SecUtils_GetKeyStoreUserHeader(data)->inner_kc_type, data, data_len));
+}
+
+RSA* SecUtils_RSAFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len)
+{
+    RSA *rsa = NULL;
+    SecUtils_KeyStoreHeader store_header;
+    SEC_BYTE store_data[SEC_KEYCONTAINER_MAX_LEN];
+
+    if (kc == SEC_KEYCONTAINER_DER_RSA_1024 || kc == SEC_KEYCONTAINER_DER_RSA_2048) {
+        rsa = SecUtils_RSAFromDERPriv(data, data_len);
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromDERPriv failed");
+            goto done;
+        }
+    } else if (kc == SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC || kc == SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC) {
+        rsa = SecUtils_RSAFromDERPub(data, data_len);
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromDERPub failed");
+            goto done;
+        }
+    } else if (kc == SEC_KEYCONTAINER_RAW_RSA_1024 || kc == SEC_KEYCONTAINER_RAW_RSA_2048) {
+        if (data_len == sizeof(Sec_RSARawPrivateKey))
+        {
+            rsa = SecUtils_RSAFromPrivBinary((Sec_RSARawPrivateKey *) data);
+            if (rsa == NULL)
+            {
+                SEC_LOG_ERROR("Sec_RSARawPrivateKey failed");
+                goto done;
+            }
+        } else if (data_len == sizeof(Sec_RSARawPrivateFullKey)) {
+            rsa = SecUtils_RSAFromPrivFullBinary((Sec_RSARawPrivateFullKey *) data);
+            if (rsa == NULL)
+            {
+                SEC_LOG_ERROR("Sec_RSARawPrivateFullKey failed");
+                goto done;
+            }
+        } else {
+            SEC_LOG_ERROR("Invalid priv key structure size: %d", data_len);
+            goto done;
+        }
+    } else if (kc == SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC || kc == SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC) {
+        if (data_len != sizeof(Sec_RSARawPublicKey))
+        {
+            SEC_LOG_ERROR("Invalid pub key structure size: %d", data_len);
+            goto done;
+        }
+
+        rsa = SecUtils_RSAFromPubBinary((Sec_RSARawPublicKey *) data);
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromPubBinary failed");
+            goto done;
+        }
+    } else if (kc == SEC_KEYCONTAINER_PEM_RSA_1024 || kc == SEC_KEYCONTAINER_PEM_RSA_2048) {
+        rsa = SecUtils_RSAFromPEMPriv(data, data_len);
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromPEMPriv failed");
+            goto done;
+        }
+    } else if (kc == SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC || kc == SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC) {
+        rsa = SecUtils_RSAFromPEMPub(data, data_len);
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromPEMPub failed");
+            goto done;
+        }
+    }
+    else if (kc == SEC_KEYCONTAINER_STORE) {
+        if (SEC_RESULT_SUCCESS != SecStore_RetrieveData(proc, SEC_FALSE,
+                &store_header, sizeof(store_header),
+                store_data, sizeof(store_data),
+                data, data_len))
+        {
+            SEC_LOG_ERROR("SecStore_RetrieveData failed");
+            goto done;
+        }
+
+        rsa = SecUtils_RSAFromClearKC(proc, store_header.inner_kc_type, store_data, SecStore_GetDataLen(data));
+        if (rsa == NULL)
+        {
+            SEC_LOG_ERROR("SecUtils_RSAFromKc failed");
+            goto done;
+        }
+    } else {
+        SEC_LOG_ERROR("Unknown container type");
+        goto done;
+    }
+
+done:
+    return rsa;
 }
 
 SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem)
@@ -710,12 +808,26 @@ SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem)
     return written;
 }
 
-X509 * SecUtils_DerToX509(void *mem, SEC_SIZE len)
+SEC_SIZE SecUtils_X509ToDerLen(X509 *x509, void *mem, SEC_SIZE mem_len)
 {
-    X509 *x509 = NULL;
-    const SEC_BYTE *ptr = (const SEC_BYTE *) mem;
-    x509 = d2i_X509(&x509, &ptr, len);
-    return x509;
+    int written = 0;
+    SEC_BYTE *ptr = (SEC_BYTE *) mem;
+
+    if (i2d_X509(x509, NULL) >= mem_len)
+    {
+        SEC_LOG_ERROR("Buffer is too small");
+        return 0;
+    }
+
+    written = i2d_X509(x509, &ptr);
+
+    if (written < 0)
+    {
+        SEC_LOG_ERROR("i2d_X509 failed");
+        return 0;
+    }
+
+    return written;
 }
 
 Sec_Result SecUtils_VerifyX509WithRawPublicKey(X509 *x509,
@@ -759,62 +871,6 @@ Sec_Result SecUtils_VerifyX509WithRawPublicKey(X509 *x509,
         SEC_EVPPKEY_FREE(evp_key);
 
     return SEC_RESULT_FAILURE;
-}
-
-uint32_t SecUtils_CRC(void *intput, SEC_SIZE input_len)
-{
-    uint32_t crc = crc32(0L, Z_NULL, 0);
-    crc = crc32(crc, intput, input_len);
-    return crc;
-}
-
-uint16_t SecUtils_EndianSwap_uint16(uint16_t val)
-{
-    return (val << 8) | (val >> 8);
-}
-
-int16_t SecUtils_EndianSwap_int16(int16_t val)
-{
-    return (val << 8) | ((val >> 8) & 0xFF);
-}
-
-uint32_t SecUtils_EndianSwap_uint32(uint32_t val)
-{
-    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
-    return (val << 16) | (val >> 16);
-}
-
-int32_t SecUtils_EndianSwap_int32(int32_t val)
-{
-    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
-    return (val << 16) | ((val >> 16) & 0xFFFF);
-}
-
-int64_t SecUtils_EndianSwap_int64(int64_t val)
-{
-    val = ((val << 8) & 0xFF00FF00FF00FF00ULL)
-            | ((val >> 8) & 0x00FF00FF00FF00FFULL);
-    val = ((val << 16) & 0xFFFF0000FFFF0000ULL)
-            | ((val >> 16) & 0x0000FFFF0000FFFFULL);
-    return (val << 32) | ((val >> 32) & 0xFFFFFFFFULL);
-}
-
-uint64_t SecUtils_EndianSwap_uint64(uint64_t val)
-{
-    val = ((val << 8) & 0xFF00FF00FF00FF00ULL)
-            | ((val >> 8) & 0x00FF00FF00FF00FFULL);
-    val = ((val << 16) & 0xFFFF0000FFFF0000ULL)
-            | ((val >> 16) & 0x0000FFFF0000FFFFULL);
-    return (val << 32) | (val >> 32);
-}
-
-void SecUtils_PrintHex(void* data, SEC_SIZE numBytes)
-{
-    SEC_BYTE* data_ptr = (SEC_BYTE *) data;
-    SEC_SIZE i;
-    SEC_PRINT("0x");
-    for (i = 0; i < numBytes; ++i)
-        SEC_PRINT("%02x", data_ptr[i]);
 }
 
 #define GETU32(pt) (((uint32_t)(pt)[0] << 24) ^ ((uint32_t)(pt)[1] << 16) ^ ((uint32_t)(pt)[2] <<  8) ^ ((uint32_t)(pt)[3]))
@@ -861,15 +917,13 @@ void SecUtils_AesCtrInc(SEC_BYTE *counter)
     PUTU32(counter + 0, c);
 }
 
-Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE keySize)
+Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE* padded_len, SEC_SIZE keySize)
 {
     X509_SIG sig;
     ASN1_TYPE parameter;
-    int i, j;
     SEC_BYTE *p = NULL;
     X509_ALGOR algor;
     ASN1_OCTET_STRING digest_str;
-    SEC_BYTE temp_padded[SEC_RSA_KEY_MAX_LEN+1];
     int type;
 
     if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
@@ -911,20 +965,31 @@ Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, 
     sig.digest->data = (SEC_BYTE *) digest;
     sig.digest->length = digest_len;
 
-    i = i2d_X509_SIG(&sig, NULL);
-
-    j = keySize;
-    if (i > (j - RSA_PKCS1_PADDING_SIZE))
+    *padded_len = i2d_X509_SIG(&sig, NULL);
+    if (*padded_len > (keySize - RSA_PKCS1_PADDING_SIZE))
     {
         SEC_LOG_ERROR("Digest is too large");
         return SEC_RESULT_FAILURE;
     }
-
-    p = temp_padded;
+    p = padded;
     i2d_X509_SIG(&sig, &p);
 
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE keySize)
+{
+    SEC_SIZE temp_padded_len;
+    SEC_BYTE temp_padded[SEC_RSA_KEY_MAX_LEN+1];
+
+    if (SEC_RESULT_SUCCESS != SecUtils_DigestInfoForRSASign(alg, digest, digest_len, temp_padded, &temp_padded_len, keySize))
+    {
+        SEC_LOG_ERROR("SecUtils_DigestInfoForRSASign failed");
+        return SEC_RESULT_FAILURE;
+    }
+
     if (!RSA_padding_add_PKCS1_type_1((SEC_BYTE *) padded, keySize,
-            (SEC_BYTE *) temp_padded, i))
+            (SEC_BYTE *) temp_padded, temp_padded_len))
     {
         SEC_LOG_ERROR("RSA_padding_add_PKCS1_type_1 failed");
         return SEC_RESULT_FAILURE;
@@ -933,79 +998,6 @@ Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, 
     return SEC_RESULT_SUCCESS;
 }
 
-SecUtils_Endianess SecUtils_GetEndianess(void)
-{
-    uint32_t u32Val = 0x03020100;
-    uint8_t *u8ptr = (uint8_t*) &u32Val;
-
-    if (u8ptr[0] == 0x03 && u8ptr[1] == 0x02 && u8ptr[2] == 0x01 && u8ptr[3] == 0x00)
-        return SEC_ENDIANESS_BIG;
-
-    if (u8ptr[0] == 0x00 && u8ptr[1] == 0x01 && u8ptr[2] == 0x02 && u8ptr[3] == 0x03)
-        return SEC_ENDIANESS_LITTLE;
-
-    return SEC_ENDIANESS_UNKNOWN;
-}
-
-uint32_t SecUtils_BEBytesToUint32(SEC_BYTE *bytes)
-{
-    uint32_t val;
-
-    memcpy(&val, bytes, 4);
-
-    switch (SecUtils_GetEndianess())
-    {
-        case SEC_ENDIANESS_BIG:
-            return val;
-        case SEC_ENDIANESS_LITTLE:
-            return SecUtils_EndianSwap_uint32(val);
-        default:
-            break;
-    }
-
-    SEC_LOG_ERROR("Unknown endianess detected");
-    return 0;
-}
-
-uint64_t SecUtils_BEBytesToUint64(SEC_BYTE *bytes)
-{
-    uint64_t val;
-
-    memcpy(&val, bytes, 8);
-
-    switch (SecUtils_GetEndianess())
-    {
-        case SEC_ENDIANESS_BIG:
-            return val;
-        case SEC_ENDIANESS_LITTLE:
-            return SecUtils_EndianSwap_uint64(val);
-        default:
-            break;
-    }
-
-    SEC_LOG_ERROR("Unknown endianess detected");
-    return 0;
-}
-
-void SecUtils_Uint32ToBEBytes(uint32_t val, SEC_BYTE *bytes)
-{
-    if (SecUtils_GetEndianess() == SEC_ENDIANESS_LITTLE)
-    {
-        val = SecUtils_EndianSwap_uint32(val);
-    }
-
-    memcpy(bytes, &val, 4);
-}
-
-void SecUtils_Uint64ToBEBytes(uint64_t val, SEC_BYTE *bytes)
-{
-    if (SecUtils_GetEndianess() == SEC_ENDIANESS_LITTLE)
-    {
-        val = SecUtils_EndianSwap_uint64(val);
-    }
-
-    memcpy(bytes, &val, 8);
-}
 SEC_BYTE SecUtils_EndsWith(const char* str, const char* end)
 {
     SEC_SIZE lenstr;
@@ -1080,3 +1072,166 @@ SEC_SIZE SecUtils_UpdateItemListFromDir(SEC_OBJECTID *items, SEC_SIZE maxNumItem
 
     return numItems;
 }
+
+SEC_BOOL SecUtils_BitmapGet(SEC_BYTE *bitmap, SEC_SIZE bitNo)
+{
+    return SEC_BIT_READ(bitmap[bitNo/8], bitNo%8) != 0;
+}
+
+void SecUtils_BitmapSet(SEC_BYTE *bitmap, SEC_SIZE bitNo, SEC_BOOL val)
+{
+    bitmap[bitNo/8] = SEC_BIT_WRITE(bitNo%8, bitmap[bitNo/8], val);
+}
+
+SEC_SIZE SecUtils_BitmapGetFirst(SEC_BYTE *bitmap, SEC_SIZE num_bytes, SEC_BOOL val)
+{
+    SEC_SIZE i;
+    SEC_SIZE j;
+
+    for (i=0; i<num_bytes; ++i)
+    {
+        if ((val && bitmap[i] != 0x00) || (!val && bitmap[i] != 0xff))
+        {
+            for (j=0; j<8; ++j)
+            {
+                if (SEC_BIT_READ(j, bitmap[i]) == val)
+                {
+                    return i*8 + j;
+                }
+            }
+        }
+    }
+
+    return (SEC_SIZE) -1;
+}
+
+/*
+Sec_Result SecUtils_PoolInit(pthread_mutex_t *mutex, SEC_BOOL shared, SEC_BYTE *bitmap, SEC_SIZE num_bytes, SEC_SIZE num_bits)
+{
+    Sec_MutexResult res;
+    SEC_SIZE i;
+
+    res = SecMutex_Init(mutex, shared);
+
+    if (res == SEC_MUTEXRESULT_OK)
+    {
+        SEC_MUTEX_LOCK(mutex);
+
+        Sec_Memset(bitmap, 0, num_bytes);
+        for (i=num_bits; i<(num_bytes*8); ++i)
+        {
+            SecUtils_BitmapSet(bitmap, i, 1);
+        }
+
+        SEC_MUTEX_UNLOCK(mutex);
+    }
+    else if (res == SEC_MUTEXRESULT_ALREADY_INITIALIZED)
+    {
+        //only the thread/process that created the mutex will run the initialization code
+    }
+    else
+    {
+        SEC_LOG_ERROR("SEC_MUTEX_INIT failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+SEC_SIZE SecUtils_PoolAcquire(pthread_mutex_t *mutex, SEC_BYTE *bitmap, SEC_SIZE num_bytes)
+{
+    SEC_SIZE ret = (SEC_SIZE) -1;
+
+    while (1)
+    {
+        SEC_MUTEX_LOCK(mutex);
+        ret = SecUtils_BitmapGetFirst(bitmap, num_bytes, 0);
+        if (ret != (SEC_SIZE) -1)
+        {
+            SecUtils_BitmapSet(bitmap, ret, 1);
+            SEC_MUTEX_UNLOCK(mutex);
+            break;
+        }
+        SEC_MUTEX_UNLOCK(mutex);
+
+        // yield processing time to other threads/processes
+        sleep(0);
+    }
+
+    return ret;
+}
+
+void SecUtils_PoolRelease(pthread_mutex_t *mutex, SEC_BYTE *bitmap, SEC_SIZE num_bytes, SEC_SIZE bitNo)
+{
+    SEC_MUTEX_LOCK(mutex);
+
+    if (SecUtils_BitmapGet(bitmap, bitNo) != 1)
+    {
+        SEC_LOG_ERROR("Attempting to release an already released bit %d", bitNo);
+    }
+    else
+    {
+        SecUtils_BitmapSet(bitmap, bitNo, 0);
+    }
+
+    SEC_MUTEX_UNLOCK(mutex);
+}
+*/
+
+Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, Sec_KeyType wrappedType, SEC_BYTE *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc,
+            wrappingAlg, SEC_CIPHERMODE_ENCRYPT, wrappingKey,
+            iv, wrappedKey, SecKey_GetKeyLenForKeyType(wrappedType), out,
+            out_len, written)) {
+        SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    SEC_BYTE pkcs8[SEC_KEYCONTAINER_MAX_LEN];
+    SEC_SIZE pkcs8_len;
+
+    if (SEC_RESULT_SUCCESS != SecUtils_RSAToDERPriv(wrappedKey, pkcs8, sizeof(pkcs8), &pkcs8_len))
+    {
+        SEC_LOG_ERROR("SecUtils_RSAToDERPriv failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc,
+            wrappingAlg, SEC_CIPHERMODE_ENCRYPT, wrappingKey,
+            iv, pkcs8, pkcs8_len, out,
+            out_len, written)) {
+        SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written)
+{
+    SEC_BYTE pkcs8[SEC_KEYCONTAINER_MAX_LEN];
+    SEC_SIZE pkcs8_len;
+
+    if (SEC_RESULT_SUCCESS != SecUtils_RSAToDERPrivKeyInfo(wrappedKey, pkcs8, sizeof(pkcs8), &pkcs8_len))
+    {
+        SEC_LOG_ERROR("SecUtils_RSAToDERPriv failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc,
+            wrappingAlg, SEC_CIPHERMODE_ENCRYPT, wrappingKey,
+            iv, pkcs8, pkcs8_len, out,
+            out_len, written)) {
+        SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+

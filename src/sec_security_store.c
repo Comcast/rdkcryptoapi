@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2014 Comcast Cable Communications Management, LLC
  *
@@ -15,8 +16,6 @@
  */
 
 #include "sec_security_store.h"
-#include "sec_security_common.h"
-#include "sec_security_utils.h"
 #include <string.h>
 #include <openssl/hmac.h>
 #include <openssl/sha.h>
@@ -33,31 +32,31 @@ Sec_Result SecStore_GenerateLadderInputs(Sec_ProcessorHandle *proc, const char* 
     SEC_SIZE loop = 1;
     SEC_BYTE loop_buf[4];
 
-    SecUtils_BufferInit(&sec_buf, sec_buf_mem, sizeof(sec_buf_mem));
+    SecBuffer_Init(&sec_buf, sec_buf_mem, sizeof(sec_buf_mem));
 
     while (len > 0)
     {
-        SecUtils_BufferReset(&sec_buf);
+        SecBuffer_Reset(&sec_buf);
 
-        SecUtils_Uint32ToBEBytes(loop, loop_buf);
+        Sec_Uint32ToBEBytes(loop, loop_buf);
 
-        if (input != NULL && SEC_RESULT_SUCCESS != SecUtils_BufferWrite(&sec_buf, (SEC_BYTE*) input, strlen(input)))
+        if (input != NULL && SEC_RESULT_SUCCESS != SecBuffer_Write(&sec_buf, (SEC_BYTE*) input, strlen(input)))
         {
-            SEC_LOG_ERROR("SecUtils_BufferWrite failed");
+            SEC_LOG_ERROR("SecBuffer_Write failed");
             return SEC_RESULT_FAILURE;
         }
 //        SEC_PRINT("input: <%s>\n", input != NULL ? input : "NULL");
 
-        if (input2 != NULL && SEC_RESULT_SUCCESS != SecUtils_BufferWrite(&sec_buf, (SEC_BYTE*) input2, strlen(input2)))
+        if (input2 != NULL && SEC_RESULT_SUCCESS != SecBuffer_Write(&sec_buf, (SEC_BYTE*) input2, strlen(input2)))
         {
-            SEC_LOG_ERROR("SecUtils_BufferWrite failed");
+            SEC_LOG_ERROR("SecBuffer_Write failed");
             return SEC_RESULT_FAILURE;
         }
 //        SEC_PRINT("input2: <%s>\n", input2 != NULL ? input2 : "NULL");
 
-        if (SEC_RESULT_SUCCESS != SecUtils_BufferWrite(&sec_buf, loop_buf, sizeof(loop_buf)))
+        if (SEC_RESULT_SUCCESS != SecBuffer_Write(&sec_buf, loop_buf, sizeof(loop_buf)))
         {
-            SEC_LOG_ERROR("SecUtils_BufferWrite failed");
+            SEC_LOG_ERROR("SecBuffer_Write failed");
             return SEC_RESULT_FAILURE;
         }
 
@@ -95,17 +94,12 @@ void *SecStore_GetUserHeader(void *store)
 
 static SEC_SIZE SecStore_GetHeaderLen(void *store)
 {
-    return SecUtils_BEBytesToUint32(SecStore_GetHeader(store)->header_len);
-}
-
-static SEC_SIZE SecStore_GetUserHeaderLen(void *store)
-{
-    return SecStore_GetHeaderLen(store) - sizeof(SecStore_Header);
+    return Sec_BEBytesToUint32(SecStore_GetHeader(store)->header_len);
 }
 
 SEC_SIZE SecStore_GetDataLen(void *store)
 {
-    return SecUtils_BEBytesToUint32(SecStore_GetHeader(store)->data_len);
+    return Sec_BEBytesToUint32(SecStore_GetHeader(store)->data_len);
 }
 
 static SEC_SIZE SecStore_GetPaddedDataLen(void *store)
@@ -123,6 +117,11 @@ SEC_SIZE SecStore_GetStoreLen(void* store)
     return SecStore_CalculateStoreLen(SecStore_GetHeaderLen(store), SecStore_GetDataLen(store));
 }
 
+SEC_SIZE SecStore_GetUserHeaderLen(void* store)
+{
+    return SecStore_GetHeaderLen(store) - sizeof(SecStore_Header);
+}
+
 static SEC_BYTE *SecStore_GetMac(void *store)
 {
     return ((SEC_BYTE*) store) + SecStore_GetStoreLen(store) - SEC_STORE_IV_LEN - SEC_STORE_MAC_LEN;
@@ -133,7 +132,7 @@ static SEC_BYTE *SecStore_GetIV(void *store)
     return ((SEC_BYTE*) store) + SecStore_GetStoreLen(store) - SEC_STORE_IV_LEN;
 }
 
-SEC_BYTE *SecStore_GetData(void *store)
+static SEC_BYTE *SecStore_GetData(void *store)
 {
     return ((SEC_BYTE*) store) + SecStore_GetHeaderLen(store);
 }
@@ -163,7 +162,7 @@ static Sec_Result SecStore_ComputeMacKey(Sec_ProcessorHandle *proc, const char* 
         return SEC_RESULT_FAILURE;
     }
 
-//    SEC_PRINT("mac key: "); SecUtils_PrintHex(key, key_len); SEC_PRINT("\n");
+//    SEC_PRINT("mac key: "); Sec_PrintHex(key, key_len); SEC_PRINT("\n");
 
     return SEC_RESULT_SUCCESS;
 }
@@ -320,9 +319,12 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
 
     /* check padding */
     memset(pad, SecStore_GetPaddedDataLen(copy) - SecStore_GetDataLen(copy), sizeof(pad));
-    if (SecUtils_Memcmp(pad, SecStore_GetData(copy) + SecStore_GetDataLen(copy), pad[0]) != 0)
+    if (Sec_Memcmp(pad, SecStore_GetData(copy) + SecStore_GetDataLen(copy), pad[0]) != 0)
     {
         SEC_LOG_ERROR( "Invalid pad value encountered");
+        /*
+        SEC_PRINT("pad: "); Sec_PrintHex(SecStore_GetData(copy) + SecStore_GetDataLen(copy), pad[0]); SEC_PRINT("\n");
+        */
         goto done;
     }
 
@@ -339,7 +341,7 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
     {
         if (SEC_RESULT_SUCCESS != SecStore_ComputeMacKey(proc, SEC_STORE_MAC_KEY_INPUT, mac_key, sizeof(mac_key)))
         {
-            SEC_LOG_ERROR("SecStore_GetMacKey failed");
+            SEC_LOG_ERROR("SecStore_ComputeMacKey failed");
             goto done;
         }
 
@@ -351,7 +353,7 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
             goto done;
         }
 
-        if (mac_len != SEC_STORE_MAC_LEN || SecUtils_Memcmp(mac, SecStore_GetMac(copy), SEC_STORE_MAC_LEN) != 0)
+        if (mac_len != SEC_STORE_MAC_LEN || Sec_Memcmp(mac, SecStore_GetMac(copy), SEC_STORE_MAC_LEN) != 0)
         {
             SEC_LOG_ERROR("Mac does not match");
             goto done;
@@ -385,10 +387,10 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
     res = SEC_RESULT_SUCCESS;
 
 done:
-    SecUtils_Memset(mac_key, 0, sizeof(mac_key));
+    Sec_Memset(mac_key, 0, sizeof(mac_key));
     if (NULL != copy)
     {
-        SecUtils_Memset(copy, 0, SecStore_GetStoreLen(store));
+        Sec_Memset(copy, 0, SecStore_GetStoreLen(store));
         SEC_FREE(copy);
     }
 
@@ -426,8 +428,8 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
     if (encrypt)
         header->flags |= SEC_STORE_FLAG_IS_ENCRYPTED;
 
-    SecUtils_Uint32ToBEBytes(data_len, header->data_len);
-    SecUtils_Uint32ToBEBytes(sizeof(SecStore_Header) + user_header_len, header->header_len);
+    Sec_Uint32ToBEBytes(data_len, header->data_len);
+    Sec_Uint32ToBEBytes(sizeof(SecStore_Header) + user_header_len, header->header_len);
     if (user_header_magic != NULL)
         memcpy(header->user_header_magic, user_header_magic, sizeof(header->user_header_magic));
 
@@ -454,12 +456,12 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
                 store, SecStore_GetStoreLen(store) - SEC_STORE_MAC_LEN - SEC_STORE_IV_LEN,
                 SecStore_GetMac(store), &mac_len))
         {
-            SecUtils_Memset(mac_key, 0, sizeof(mac_key));
+            Sec_Memset(mac_key, 0, sizeof(mac_key));
             SEC_LOG_ERROR("HMAC failed");
             return SEC_RESULT_FAILURE;
         }
 
-        SecUtils_Memset(mac_key, 0, sizeof(mac_key));
+        Sec_Memset(mac_key, 0, sizeof(mac_key));
     }
 
     if (encrypt && SEC_RESULT_SUCCESS != SecStore_Encrypt(proc, store, storeLen))
@@ -470,3 +472,26 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
 
     return SEC_RESULT_SUCCESS;
 }
+
+/*
+static Sec_Result SecStore_Print(void *store)
+{
+    SecStore_Header *header = (SecStore_Header *) store;
+
+    SEC_PRINT("store [%d]: 0x%08x\n", SecStore_GetStoreLen(store), store);
+    SEC_PRINT("\tstore_magic: "); Sec_PrintHex(header->store_magic, sizeof(header->store_magic)); SEC_PRINT("\n");
+    SEC_PRINT("\theader_len: %d\n", Sec_BEBytesToUint32(header->header_len));
+    SEC_PRINT("\tdata_len: %d\n", Sec_BEBytesToUint32(header->data_len));
+    SEC_PRINT("\tuser_header_magic: "); Sec_PrintHex(header->user_header_magic, sizeof(header->user_header_magic)); SEC_PRINT("\n");
+    SEC_PRINT("\treserved: "); Sec_PrintHex(header->reserved, sizeof(header->reserved)); SEC_PRINT("\n");
+    SEC_PRINT("\tflags: 0x%02x\n", header->flags);
+    SEC_PRINT("\tuser_header [%d]: ", SecStore_GetUserHeaderLen(store));
+    Sec_PrintHex(SecStore_GetUserHeader(store), SecStore_GetUserHeaderLen(store));
+    SEC_PRINT("\n");
+    SEC_PRINT("\tdata [%d]: ", SecStore_GetDataLen(store)); Sec_PrintHex(SecStore_GetData(store), SecStore_GetDataLen(store)); SEC_PRINT("\n");
+    SEC_PRINT("\tpadding [0x%02x]: ", SecStore_GetPaddedDataLen(store) - SecStore_GetDataLen(store)); Sec_PrintHex(SecStore_GetData(store)+SecStore_GetDataLen(store), SecStore_GetPaddedDataLen(store) - SecStore_GetDataLen(store)); SEC_PRINT("\n");
+    SEC_PRINT("\tmac [%d]: ", SEC_STORE_MAC_LEN); Sec_PrintHex(SecStore_GetMac(store), SEC_STORE_MAC_LEN); SEC_PRINT("\n");
+    SEC_PRINT("\tiv [%d]: ", SEC_STORE_IV_LEN); Sec_PrintHex(SecStore_GetIV(store), SEC_STORE_IV_LEN); SEC_PRINT("\n");
+}
+*/
+

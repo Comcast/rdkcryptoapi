@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2014 Comcast Cable Communications Management, LLC
  *
@@ -88,6 +89,7 @@ SecStore_Header *SecStore_GetHeader(void *store);
 void *SecStore_GetUserHeader(void *store);
 
 SEC_SIZE SecStore_GetStoreLen(void* store);
+SEC_SIZE SecStore_GetUserHeaderLen(void* store);
 SEC_SIZE SecStore_GetDataLen(void *store);
 
 Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac,

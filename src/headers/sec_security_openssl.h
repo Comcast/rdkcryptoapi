@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2014 Comcast Cable Communications Management, LLC
  *
@@ -18,38 +19,54 @@
 #define SEC_SECURITY_OPENSSL_H_
 
 #include "sec_security.h"
+#include "sec_security_store.h"
 
 #include <openssl/sha.h>
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
-#include "sec_security_cmac.h"
+#include "sec_cmac.h"
 
 #ifdef __cplusplus
 extern "C"
 {
 #endif
 
-#define SEC_RSA_KEY_DATA_MAX_LEN (1024 * 64)
+#define SEC_OPENSSL_KEYCONTAINER_DERIVED SEC_KEYCONTAINER_SOC_INTERNAL_0
 
-#define SEC_BASEKEY_LEN 16
+#define SEC_OBJECTID_OPENSSL_DERIVE_TMP SEC_OBJECTID_RESERVEDPLATFORM_0
+
+typedef struct
+{
+    SEC_BYTE input1[16];
+    SEC_BYTE input2[16];
+} SecOpenSSL_DerivedInputs;
 
 typedef union
 {
-    SEC_BYTE symetric_key[SEC_SYMETRIC_KEY_MAX_LEN];
-    Sec_RSARawPrivateKey rsa_key;
-} _Sec_ClearKeyBuffer;
+    /* native containers */
+    /* none for openssl impl */
+
+    /* sec store based containers */
+    SEC_BYTE buffer[SEC_KEYCONTAINER_MAX_LEN];
+    SecStore_Header store;
+} _Sec_KC;
+
+#if (SEC_KEYCONTAINER_MAX_LEN%16 != 0)
+#error "Invalid SEC_KEYCONTAINER_MAX_LEN"
+#endif
 
 typedef struct
 {
     Sec_KeyType key_type;
-    SEC_BYTE iv[SEC_AES_BLOCK_SIZE];
+    Sec_KeyContainer kc_type;
 } _Sec_KeyInfo;
 
 typedef struct
 {
     _Sec_KeyInfo info;
-    SEC_BYTE data[sizeof(_Sec_ClearKeyBuffer)];
+    _Sec_KC kc;
+    SEC_SIZE kc_len;
 } _Sec_KeyData;
 
 typedef struct
@@ -146,8 +163,6 @@ struct Sec_RandomHandle_struct
 
 struct Sec_ProcessorInitParams_struct
 {
-    SEC_BYTE device_id[SEC_DEVICEID_LEN];
-    SEC_BYTE ssk[16];
     const char *keystorage_file_dir;
     const char *certstorage_file_dir;
     const char *bundlestorage_file_dir;
@@ -177,8 +192,7 @@ typedef struct _Sec_RAMBundleData_struct
 struct Sec_ProcessorHandle_struct
 {
     SEC_BYTE device_id[SEC_DEVICEID_LEN];
-    SEC_BYTE ssk[16];
-    SEC_BYTE kwk[16];
+    SEC_BYTE root_key[16];
     _Sec_RAMKeyData *ram_keys;
     _Sec_RAMBundleData *ram_bundles;
     _Sec_RAMCertificateData *ram_certs;
@@ -187,11 +201,13 @@ struct Sec_ProcessorHandle_struct
     char bundlestorage_file_dir[SEC_MAX_FILE_PATH_LEN];
 };
 
-/* support functions */
-int SecOpenSSL_DisablePassphrasePrompt(char *buf, int size, int rwflag, void *u);
-Sec_Result SecOpenSSL_ExtractRawSymetricFromKeyHandle(Sec_KeyHandle *key_handle, SEC_BYTE *rawKey, SEC_SIZE *keyLen);
-Sec_Result SecOpenSSL_ExtractRawPrivRSAFromKeyHandle(Sec_KeyHandle *key_handle, Sec_RSARawPrivateKey *raw);
-Sec_Result SecOpenSSL_ExtractRawPubRSAFromKeyHandle(Sec_KeyHandle *key_handle, Sec_RSARawPublicKey *raw);
+typedef Sec_Result (*SecOpenSSL_CustomProcessKeyContainer)(Sec_ProcessorHandle *proc,
+        _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
+        SEC_SIZE data_len, SEC_OBJECTID objectId);
+void SecOpenssl_RegisterCustomProcessKeyContainer(SecOpenSSL_CustomProcessKeyContainer func);
+Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
+        _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
+        SEC_SIZE data_len, SEC_OBJECTID objectId);
 
 #ifdef __cplusplus
 }

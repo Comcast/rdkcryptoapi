@@ -1,3 +1,4 @@
+
 /**
  * Copyright 2014 Comcast Cable Communications Management, LLC
  *
@@ -14,62 +15,34 @@
  * limitations under the License.
  */
 
-#include "sec_security_common.h"
-#include "sec_security_utils.h"
+#include "sec_security.h"
+#ifndef SEC_COMMON_17
+#include "sec_security_asn1kc.h"
+#endif
 #include <string.h>
-#include <stdarg.h>
 #include <stdlib.h>
 
-typedef struct
+int Sec_Memcmp(const void* ptr1, const void* ptr2, const size_t num)
 {
-    SEC_OBJECTID object_id;
-    const char* urn;
-} Sec_ObjUrn;
+    size_t i;
+    SEC_BYTE result = 0;
+    SEC_BYTE* a = (SEC_BYTE*) ptr1;
+    SEC_BYTE* b = (SEC_BYTE*) ptr2;
 
-SecApiLogCallback g_sec_logcb = Sec_DefaultLogCb;
+    for (i=0; i<num; ++i)
+    {
+        result |= a[i] ^ b[i];
+    }
 
-Sec_ObjUrn g_sec_obj_urns[] = {
-    { SEC_OBJECTID_COMCAST_SGNCERT, "comcast:xcal:sgnCert" },
-    { SEC_OBJECTID_COMCAST_SGNSUBCACERT, "comcast:xcal:sgnSubCaCert" },
-    { SEC_OBJECTID_COMCAST_SGNROOTCACERT, "comcast:xcal:sgnRootCaCert"},
-    { SEC_OBJECTID_COMCAST_ENCCERT, "comcast:xcal:encCert" },
-    { SEC_OBJECTID_COMCAST_ENCSUBCACERT, "comcast:xcal:encSubCaCert"},
-    { SEC_OBJECTID_COMCAST_ENCROOTCACERT, "comcast:xcal:encRootCaCert"},
-    { SEC_OBJECTID_COMCAST_TLSCERT, "comcast:xcal:tlsCert"},
-    { SEC_OBJECTID_COMCAST_TLSSUBCACERT, "comcast:xcal:tlsCert"},
-    { SEC_OBJECTID_COMCAST_TLSROOTCACERT, "comcast:xcal:tlsRootCaCert"},
-    { SEC_OBJECTID_COMCAST_CERTCA01CERT, "comcast:xcal:certCa01Cert"},
-    { SEC_OBJECTID_COMCAST_STATUSCA01CERT, "comcast:xcal:statusCa01Cert"},
-    { SEC_OBJECTID_COMCAST_SGNKEY, "comcast:xcal:sgnKey"},
-    { SEC_OBJECTID_COMCAST_ENCKEY, "comcast:xcal:encKey"},
-    { SEC_OBJECTID_COMCAST_TLSKEY, "comcast:xcal:tlsKey"},
-    { SEC_OBJECTID_COMCAST_PKIBUNDLE, "comcast:xcal:pkiBundle"},
-    { SEC_OBJECTID_COMCAST_HASHLOCKED, "comcast:xcal:hashLock"},
-    { SEC_OBJECTID_ADOBE_DRMMODELKEY, "adobe:flashAccess:drmModelKey"},
-    { SEC_OBJECTID_ADOBE_DRMMODELCERT, "adobe:flashAccess:drmModelCert"},
-    { SEC_OBJECTID_ADOBE_DRMMODELINTERMEDIATERUNTIMEDRMCACERT, "adobe:flashAccess:drmModelIntermediateRuntimeDrmCaCert"},
-    { SEC_OBJECTID_ADOBE_DRMMODELINTERMEDIATECACERT, "adobe:flashAccess:drmModelIntermediateCaCert"},
-    { SEC_OBJECTID_ADOBE_DRMMODELROOTCACERT, "adobe:flashAccess:drmModelRootCaCert"},
-    { SEC_OBJECTID_ADOBE_SD01CERT, "adobe:flashAccess:sd01Cert"},
-    { SEC_OBJECTID_ADOBE_SD01INTERMEDIATERUNTIMEDRMCACERT, "adobe:flashAccess:sd01IntermediateRuntimeDrmCaCert"},
-    { SEC_OBJECTID_ADOBE_SD01INTERMEDIATECACERT, "adobe:flashAccess:sd01IntermediateCaCert"},
-    { SEC_OBJECTID_ADOBE_SD01ROOTCACERT, "adobe:flashAccess:sd01RootCaCert"},
-    { SEC_OBJECTID_ADOBE_SD02CERT, "adobe:flashAccess:sd02Cert"},
-    { SEC_OBJECTID_ADOBE_SD02INTERMEDIATERUNTIMEDRMCACERT, "adobe:flashAccess:sd02IntermediateRuntimeDrmCaCert"},
-    { SEC_OBJECTID_ADOBE_SD02INTERMEDIATECACERT, "adobe:flashAccess:sd02IntermediateCaCert"},
-    { SEC_OBJECTID_ADOBE_SD02ROOTCACERT, "adobe:flashAccess:sd02RootCaCert"},
-    { SEC_OBJECTID_ADOBE_SD03CERT, "adobe:flashAccess:sd03Cert"},
-    { SEC_OBJECTID_ADOBE_SD03INTERMEDIATERUNTIMEDRMCACERT, "adobe:flashAccess:sd03IntermediateRuntimeDrmCaCert"},
-    { SEC_OBJECTID_ADOBE_SD03INTERMEDIATECACERT, "adobe:flashAccess:sd03IntermediateCaCert"},
-    { SEC_OBJECTID_ADOBE_SD03ROOTCACERT, "adobe:flashAccess:sd03RootCaCert"},
-    { SEC_OBJECTID_ADOBE_INDIVTRANSPORTCERT, "adobe:flashAccess:indivTransportCert"},
-    { SEC_OBJECTID_ADOBE_SD01KEY, "adobe:flashAccess:sd01Key"},
-    { SEC_OBJECTID_ADOBE_SD02KEY, "adobe:flashAccess:sd02Key"},
-    { SEC_OBJECTID_ADOBE_SD03KEY, "adobe:flashAccess:sd03Key"},
-    { SEC_OBJECTID_ADOBE_PRODADOBEROOTDIGEST, "adobe:flashAccess:prodAdobeRootDigest"},
-    { SEC_OBJECTID_ADOBE_DRMPKI, "adobe:flashAccess:drmPkiBundle" },
-    { SEC_OBJECTID_INVALID, "" }
-};
+    return result;
+}
+void *Sec_Memset(void *ptr, int value, size_t num)
+{
+    volatile SEC_BYTE *p = ptr;
+    while (num--)
+        *p++ = value;
+    return ptr;
+}
 
 Sec_Result SecCipher_IsValidKey(Sec_KeyType key_type,
         Sec_CipherAlgorithm algorithm, Sec_CipherMode mode, SEC_BYTE *iv)
@@ -96,7 +69,7 @@ Sec_Result SecCipher_IsValidKey(Sec_KeyType key_type,
             }
             else
             {
-                SEC_LOG_ERROR("Not an AES key");
+                SEC_LOG_ERROR("Not an AES key: %d", key_type);
                 return SEC_RESULT_FAILURE;
             }
             break;
@@ -140,19 +113,13 @@ Sec_Result SecCipher_IsValidKey(Sec_KeyType key_type,
     return SEC_RESULT_UNIMPLEMENTED_FEATURE;
 }
 
-Sec_Result SecCipher_CheckInputOutputSizes(Sec_CipherAlgorithm algorithm,
+Sec_Result SecCipher_GetRequiredOutputSize(Sec_CipherAlgorithm algorithm,
         Sec_CipherMode mode, Sec_KeyType keyType, SEC_SIZE inputSize,
-        SEC_SIZE outputSize, SEC_BOOL lastInput)
+        SEC_SIZE *outputSize, SEC_BOOL lastInput)
 {
     SEC_SIZE maxClearSize = 0;
-    SEC_SIZE outputSizeNeeded = 0;
     SEC_SIZE rsa_block_size = 0;
-
-    if (inputSize <= 0)
-    {
-        SEC_LOG_ERROR("Empty input is not allowed");
-        return SEC_RESULT_INVALID_INPUT_SIZE;
-    }
+    *outputSize = 0;
 
     switch (algorithm)
     {
@@ -165,12 +132,7 @@ Sec_Result SecCipher_CheckInputOutputSizes(Sec_CipherAlgorithm algorithm,
                 return SEC_RESULT_INVALID_INPUT_SIZE;
             }
 
-            outputSizeNeeded = inputSize;
-            if (outputSize < outputSizeNeeded)
-            {
-                SEC_LOG_ERROR("Output buffer is too small");
-                return SEC_RESULT_BUFFER_TOO_SMALL;
-            }
+            *outputSize = inputSize;
             break;
 
         case SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING:
@@ -192,18 +154,13 @@ Sec_Result SecCipher_CheckInputOutputSizes(Sec_CipherAlgorithm algorithm,
                 return SEC_RESULT_INVALID_INPUT_SIZE;
             }
 
-            outputSizeNeeded = (inputSize / 16) * 16
+            *outputSize = (inputSize / 16) * 16
                     + ((lastInput && (mode == SEC_CIPHERMODE_ENCRYPT || mode == SEC_CIPHERMODE_ENCRYPT_NATIVEMEM)) ? 16 : 0);
-            if (outputSize < outputSizeNeeded)
-            {
-                SEC_LOG_ERROR("Output buffer is too small");
-                return SEC_RESULT_BUFFER_TOO_SMALL;
-            }
             break;
 
         case SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING:
         case SEC_CIPHERALGORITHM_RSA_OAEP_PADDING:
-            rsa_block_size = outputSizeNeeded = SecKey_GetKeyLenForKeyType(
+            rsa_block_size = *outputSize = SecKey_GetKeyLenForKeyType(
                     keyType);
 
             if (algorithm == SEC_CIPHERALGORITHM_RSA_OAEP_PADDING)
@@ -226,12 +183,6 @@ Sec_Result SecCipher_CheckInputOutputSizes(Sec_CipherAlgorithm algorithm,
                 SEC_LOG_ERROR( "Encrypt input size is too large");
                 return SEC_RESULT_INVALID_INPUT_SIZE;
             }
-
-            if (outputSize < outputSizeNeeded)
-            {
-                SEC_LOG_ERROR("Output buffer is too small");
-                return SEC_RESULT_BUFFER_TOO_SMALL;
-            }
             break;
 
             /* NEW: other cipher algorithms */
@@ -244,17 +195,11 @@ Sec_Result SecCipher_CheckInputOutputSizes(Sec_CipherAlgorithm algorithm,
     unimplemented: return SEC_RESULT_UNIMPLEMENTED_FEATURE;
 }
 
-Sec_Result SecCipher_CheckFragmentedInputOutputSizes(Sec_CipherAlgorithm algorithm,
+Sec_Result SecCipher_GetRequiredOutputSizeFragmented(Sec_CipherAlgorithm algorithm,
         Sec_CipherMode mode, Sec_KeyType keyType, SEC_SIZE inputSize,
-        SEC_SIZE outputSize, SEC_BOOL lastInput, SEC_SIZE fragmentOffset, SEC_SIZE fragmentSize, SEC_SIZE fragmentPeriod)
+        SEC_SIZE *outputSizeNeeded, SEC_BOOL lastInput, SEC_SIZE fragmentOffset, SEC_SIZE fragmentSize, SEC_SIZE fragmentPeriod)
 {
-    SEC_SIZE outputSizeNeeded = 0;
-
-    if (inputSize <= 0)
-    {
-        SEC_LOG_ERROR("Empty input is not allowed");
-        return SEC_RESULT_INVALID_INPUT_SIZE;
-    }
+    *outputSizeNeeded = 0;
 
     if ((inputSize % fragmentPeriod) != 0)
     {
@@ -281,12 +226,7 @@ Sec_Result SecCipher_CheckFragmentedInputOutputSizes(Sec_CipherAlgorithm algorit
         case SEC_CIPHERALGORITHM_AES_CTR:
         case SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING:
         case SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING:
-            outputSizeNeeded = inputSize;
-            if (outputSize < outputSizeNeeded)
-            {
-                SEC_LOG_ERROR("Output buffer is too small");
-                return SEC_RESULT_BUFFER_TOO_SMALL;
-            }
+            *outputSizeNeeded = inputSize;
             break;
 
             /* NEW: other cipher algorithms */
@@ -342,13 +282,25 @@ Sec_Result SecCipher_SingleInputId(Sec_ProcessorHandle *proc,
         goto done;
     }
 
-    res = SecCipher_SingleInput(proc, alg, mode, key_handle, iv, input, input_len, output, output_len, written);
+    if (SEC_RESULT_SUCCESS != SecCipher_SingleInput(proc, alg, mode, key_handle, iv, input, input_len, output, output_len, written))
+    {
+        SEC_LOG_ERROR("SecCipher_SingleInput failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
 
 done:
     if (key_handle != NULL)
         SecKey_Release(key_handle);
 
     return res;
+}
+
+SEC_BOOL SecCipher_IsCBC(Sec_CipherAlgorithm alg)
+{
+    return alg == SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING
+            || alg == SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING;
 }
 
 SEC_BOOL SecCipher_IsAES(Sec_CipherAlgorithm alg)
@@ -364,6 +316,18 @@ SEC_BOOL SecCipher_IsRsa(Sec_CipherAlgorithm alg)
 {
     return alg == SEC_CIPHERALGORITHM_RSA_OAEP_PADDING
             || alg == SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING;
+}
+
+SEC_BOOL SecCipher_IsPKCS7Padded(Sec_CipherAlgorithm algorithm)
+{
+    return algorithm == SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING
+        || algorithm == SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING;
+}
+
+SEC_BOOL SecCipher_IsDecrypt(Sec_CipherMode mode)
+{
+    return mode == SEC_CIPHERMODE_DECRYPT
+        || mode == SEC_CIPHERMODE_DECRYPT_NATIVEMEM;
 }
 
 Sec_DigestAlgorithm SecSignature_GetDigestAlgorithm(Sec_SignatureAlgorithm alg)
@@ -430,19 +394,134 @@ Sec_Result SecSignature_SingleInput(Sec_ProcessorHandle* secProcHandle,
 
     if (SEC_RESULT_SUCCESS != SecSignature_GetInstance(secProcHandle, algorithm, mode, key, &sig))
     {
+        SEC_LOG_ERROR("SecSignature_GetInstance failed");
         goto done;
     }
 
     if (SEC_RESULT_SUCCESS != SecSignature_Process(sig, input, inputSize, signature, signatureSize))
     {
+        SEC_LOG_ERROR("SecSignature_Process failed");
         goto done;
     }
 
     res = SEC_RESULT_SUCCESS;
 
-    done:
+done:
     if (sig != NULL)
+    {
         SecSignature_Release(sig);
+    }
+
+    return res;
+}
+
+Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
+        Sec_SignatureAlgorithm algorithm, Sec_SignatureMode mode,
+        Sec_CertificateHandle* cert, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* signature,
+        SEC_SIZE *signatureSize)
+{
+    Sec_Result res = SEC_RESULT_FAILURE;
+    Sec_KeyHandle *key = NULL;
+    Sec_RSARawPublicKey pubKey;
+
+    if (SEC_RESULT_SUCCESS != SecCertificate_ExtractPublicKey(cert, &pubKey))
+    {
+        SEC_LOG_ERROR("SecCertificate_ExtractPublicKey failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle,
+            SEC_OBJECTID_SIG_FROM_CERT,
+            SEC_STORAGELOC_RAM_SOFT_WRAPPED,
+            (Sec_BEBytesToUint32(pubKey.modulus_len_be) == 1024) ? SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC : SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC,
+            (SEC_BYTE *) &pubKey, sizeof(pubKey)))
+    {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_GetInstance(secProcHandle, SEC_OBJECTID_SIG_FROM_CERT, &key))
+    {
+        SEC_LOG_ERROR("SecKey_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecSignature_SingleInput(secProcHandle,
+            algorithm, mode, key, input, inputSize, signature, signatureSize))
+    {
+        SEC_LOG_ERROR("SecSignature_SingleInput failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (key != NULL)
+    {
+        SecKey_Release(key);
+    }
+
+    return res;
+}
+
+Sec_Result SecSignature_SingleInputId(Sec_ProcessorHandle* secProcHandle,
+        Sec_SignatureAlgorithm algorithm, Sec_SignatureMode mode,
+        SEC_OBJECTID id, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* signature,
+        SEC_SIZE *signatureSize)
+{
+    Sec_KeyHandle *key = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    if (SEC_RESULT_SUCCESS != SecKey_GetInstance(secProcHandle, id, &key))
+    {
+        SEC_LOG_ERROR("SecKey_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecSignature_SingleInput(secProcHandle,
+            algorithm, mode, key, input, inputSize, signature, signatureSize))
+    {
+        SEC_LOG_ERROR("SecSignature_SingleInput failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+done:
+    if (key != NULL)
+    {
+        SecKey_Release(key);
+    }
+
+    return res;
+}
+
+Sec_Result SecSignature_SingleInputCertId(Sec_ProcessorHandle* secProcHandle,
+        Sec_SignatureAlgorithm algorithm, Sec_SignatureMode mode,
+        SEC_OBJECTID cert_id, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* signature,
+        SEC_SIZE *signatureSize)
+{
+    Sec_CertificateHandle *cert = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    if (SEC_RESULT_SUCCESS != SecCertificate_GetInstance(secProcHandle, cert_id, &cert))
+    {
+        SEC_LOG_ERROR("SecCertificate_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecSignature_SingleInputCert(secProcHandle,
+            algorithm, mode, cert, input, inputSize, signature, signatureSize))
+    {
+        SEC_LOG_ERROR("SecSignature_SingleInput failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+done:
+    if (cert != NULL)
+    {
+        SecCertificate_Release(cert);
+    }
 
     return res;
 }
@@ -759,7 +838,7 @@ Sec_Result SecKey_ComputeBaseKeyLadderInputs(Sec_ProcessorHandle *secProcHandle,
     }
 
     bufferLen = SEC_NONCE_LEN + strlen(inputDerivationStr) + strlen(cipherAlgorithmStr) + sizeof(loop);
-    SecUtils_BufferInit(&inputBuffer, malloc(bufferLen), bufferLen);
+    SecBuffer_Init(&inputBuffer, malloc(bufferLen), bufferLen);
     if (NULL == inputBuffer.base)
     {
         SEC_LOG_ERROR("malloc failed");
@@ -770,21 +849,21 @@ Sec_Result SecKey_ComputeBaseKeyLadderInputs(Sec_ProcessorHandle *secProcHandle,
     {
         loop[3] = i;
 
-        SecUtils_BufferReset(&inputBuffer);
+        SecBuffer_Reset(&inputBuffer);
 
         CHECK_EXACT(
-                SecUtils_BufferWrite(&inputBuffer, nonce, SEC_NONCE_LEN),
+                SecBuffer_Write(&inputBuffer, nonce, SEC_NONCE_LEN),
                 SEC_RESULT_SUCCESS, done);
 
         CHECK_EXACT(
-                SecUtils_BufferWrite(&inputBuffer, (SEC_BYTE *) inputDerivationStr, strlen(inputDerivationStr)),
+                SecBuffer_Write(&inputBuffer, (SEC_BYTE *) inputDerivationStr, strlen(inputDerivationStr)),
                 SEC_RESULT_SUCCESS, done);
 
         CHECK_EXACT(
-                SecUtils_BufferWrite(&inputBuffer, (SEC_BYTE *) cipherAlgorithmStr, strlen(cipherAlgorithmStr)),
+                SecBuffer_Write(&inputBuffer, (SEC_BYTE *) cipherAlgorithmStr, strlen(cipherAlgorithmStr)),
                 SEC_RESULT_SUCCESS, done);
 
-        CHECK_EXACT(SecUtils_BufferWrite(&inputBuffer, loop, sizeof(loop)),
+        CHECK_EXACT(SecBuffer_Write(&inputBuffer, loop, sizeof(loop)),
                 SEC_RESULT_SUCCESS, done);
 
         res = SecDigest_SingleInput(secProcHandle, digestAlgorithm, inputBuffer.base, inputBuffer.written,
@@ -825,6 +904,35 @@ SEC_BOOL SecKey_IsClearKeyContainer(Sec_KeyContainer kct)
     }
 
     return SEC_FALSE;
+}
+
+Sec_KeyContainer SecKey_GetClearContainer(Sec_KeyType key_type)
+{
+    switch (key_type)
+    {
+        case SEC_KEYTYPE_AES_128:
+            return SEC_KEYCONTAINER_RAW_AES_128;
+        case SEC_KEYTYPE_AES_256:
+            return SEC_KEYCONTAINER_RAW_AES_256;
+        case SEC_KEYTYPE_HMAC_128:
+            return SEC_KEYCONTAINER_RAW_HMAC_128;
+        case SEC_KEYTYPE_HMAC_160:
+            return SEC_KEYCONTAINER_RAW_HMAC_160;
+        case SEC_KEYTYPE_HMAC_256:
+            return SEC_KEYCONTAINER_RAW_HMAC_256;
+        case SEC_KEYTYPE_RSA_1024:
+            return SEC_KEYCONTAINER_RAW_RSA_1024;
+        case SEC_KEYTYPE_RSA_2048:
+            return SEC_KEYCONTAINER_RAW_RSA_2048;
+        case SEC_KEYTYPE_RSA_1024_PUBLIC:
+            return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
+        case SEC_KEYTYPE_RSA_2048_PUBLIC:
+            return SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC;
+        default:
+            break;
+    }
+
+    return SEC_KEYCONTAINER_NUM;
 }
 
 SEC_BOOL SecCertificate_IsProvisioned(Sec_ProcessorHandle* secProcHandle,
@@ -917,6 +1025,47 @@ Sec_Result SecDigest_SingleInput(Sec_ProcessorHandle *proc,
     return SecDigest_Release(digest_handle, digest, digest_len);
 }
 
+Sec_Result SecDigest_SingleInputWithKeyId(Sec_ProcessorHandle *proc, Sec_DigestAlgorithm alg, SEC_OBJECTID key_id, SEC_BYTE *digest, SEC_SIZE *digest_len)
+{
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    Sec_DigestHandle *digest_handle = NULL;
+    Sec_KeyHandle *key_handle = NULL;
+
+    if (SEC_RESULT_SUCCESS != SecDigest_GetInstance(proc, alg, &digest_handle))
+    {
+        SEC_LOG_ERROR("SecDigest_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_GetInstance(proc, key_id, &key_handle))
+    {
+        SEC_LOG_ERROR("SecKey_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecDigest_UpdateWithKey(digest_handle, key_handle))
+    {
+        SEC_LOG_ERROR("SecDigest_Update failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+done:
+    if (digest_handle != NULL)
+    {
+        SecDigest_Release(digest_handle, digest, digest_len);
+        digest_handle = NULL;
+    }
+
+    if (key_handle != NULL)
+    {
+        SecKey_Release(key_handle);
+        key_handle = NULL;
+    }
+    return res;
+}
+
 Sec_Result SecRandom_SingleInput(Sec_ProcessorHandle *proc,
         Sec_RandomAlgorithm alg, SEC_BYTE *output, SEC_SIZE output_len)
 {
@@ -931,6 +1080,7 @@ Sec_Result SecRandom_SingleInput(Sec_ProcessorHandle *proc,
     if (res != SEC_RESULT_SUCCESS)
     {
         SEC_LOG_ERROR("SecRandom_Process failed");
+        SecRandom_Release(random_handle);
         return res;
     }
 
@@ -972,49 +1122,132 @@ SEC_OBJECTID SecBundle_ObtainFreeObjectId(Sec_ProcessorHandle *proc, SEC_OBJECTI
     return SEC_OBJECTID_INVALID;
 }
 
-void Sec_SetLogger(SecApiLogCallback cb)
+#ifndef SEC_COMMON_17
+Sec_Result SecKey_GenerateWrappedKeyAsn1(SEC_BYTE *wrappedKey, SEC_SIZE wrappedKeyLen, Sec_KeyType wrappedKeyType,
+        SEC_OBJECTID wrappingKeyId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
+        SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written)
 {
-    g_sec_logcb = cb;
-}
+    Sec_Asn1KC *asn1kc = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
 
-SecApiLogCallback Sec_GetLogger(void)
-{
-    return g_sec_logcb;
-}
-
-void Sec_DefaultLogCb(const char *fmt, ...)
-{
-    va_list args;
-
-    va_start(args, fmt);
-    vfprintf(stdout, fmt, args);
-    va_end (args);
-
-    fflush(stdout);
-}
-
-const char* Sec_GetObjectUrn(SEC_OBJECTID object_id)
-{
-    Sec_ObjUrn* ptr = &g_sec_obj_urns[0];
-
-    while (ptr->object_id != SEC_OBJECTID_INVALID)
+    asn1kc = SecAsn1KC_Alloc();
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrBuffer(asn1kc, SEC_ASN1KC_WRAPPEDKEY, wrappedKey, wrappedKeyLen))
     {
-        if (ptr->object_id == object_id)
-            return ptr->urn;
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrBuffer failed");
+        goto done;
     }
 
-    return "";
-}
-
-SEC_OBJECTID Sec_GetObjectId(const char* urn)
-{
-    Sec_ObjUrn* ptr = &g_sec_obj_urns[0];
-
-    while (ptr->object_id != SEC_OBJECTID_INVALID)
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUlong(asn1kc, SEC_ASN1KC_WRAPPEDKEYTYPEID, wrappedKeyType))
     {
-        if (strcmp(urn, ptr->urn) == 0)
-            return ptr->object_id;
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUlong failed");
+        goto done;
     }
 
-    return SEC_OBJECTID_INVALID;
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUint64(asn1kc, SEC_ASN1KC_WRAPPINGKEYID, wrappingKeyId))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUint64 failed");
+        goto done;
+    }
+
+    if (wrappingIv != NULL && SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrBuffer(asn1kc, SEC_ASN1KC_WRAPPINGIV, wrappingIv, SEC_AES_BLOCK_SIZE))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrBuffer failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUlong(asn1kc, SEC_ASN1KC_WRAPPINGALGORITHMID, wrappingAlgorithm))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUlong failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_Encode(asn1kc, output, output_len, written))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_Encode failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (asn1kc != NULL)
+    {
+        SecAsn1KC_Free(asn1kc);
+        asn1kc = NULL;
+    }
+
+    return res;
 }
+
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1(Sec_Asn1KC *kc,
+        SEC_BYTE *wrappedKey, SEC_SIZE wrappedKeyLen, SEC_SIZE *written,
+        Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg)
+{
+    unsigned long ulongVal;
+    SEC_SIZE writtenIv;
+
+    if (kc == NULL)
+    {
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPEDKEY, wrappedKey, wrappedKeyLen, written))
+    {
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPEDKEYTYPEID, &ulongVal))
+    {
+        return SEC_RESULT_FAILURE;
+    }
+    *wrappedKeyType = (Sec_KeyType) ulongVal;
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUint64(kc, SEC_ASN1KC_WRAPPINGKEYID, wrappingId))
+    {
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SecAsn1KC_HasAttr(kc, SEC_ASN1KC_WRAPPINGIV) && SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPINGIV, wrappingIv, SEC_AES_BLOCK_SIZE, &writtenIv))
+    {
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPINGALGORITHMID, &ulongVal))
+    {
+        return SEC_RESULT_FAILURE;
+    }
+    *wrappingAlg = (Sec_CipherAlgorithm) ulongVal;
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Buffer(SEC_BYTE *asn1, SEC_SIZE asn1_len,
+        SEC_BYTE *wrappedKey, SEC_SIZE wrappedKeyLen, SEC_SIZE *written,
+        Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg)
+{
+    Sec_Asn1KC *asn1kc = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    asn1kc = SecAsn1KC_Decode(asn1, asn1_len);
+    if (asn1kc == NULL)
+    {
+        SEC_LOG_ERROR("SecAsn1KC_Decode failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_ExtractWrappedKeyParamsAsn1(asn1kc, wrappedKey, wrappedKeyLen, written,
+            wrappedKeyType, wrappingId, wrappingIv, wrappingAlg))
+    {
+        SEC_LOG_ERROR("SecKey_ExtractWrappedKeyParamsAsn1 failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SecAsn1KC_Free(asn1kc);
+    return res;
+}
+
+#endif
+
