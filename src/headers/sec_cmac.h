@@ -61,9 +61,9 @@ extern "C" {
 #include <openssl/evp.h>
 
 /* Opaque */
-typedef struct CMAC_CTX_st CMAC_CTX;
+typedef struct Comcast_CMAC_CTX_st Comcast_CMAC_CTX;
 
-struct CMAC_CTX_st
+struct Comcast_CMAC_CTX_st
     {
     /* Cipher context to use */
     EVP_CIPHER_CTX cctx;
@@ -83,23 +83,23 @@ CMAC_CTX *CMAC_CTX_new(void);
 */
 
 /* Comcast: Added */
-void CMAC_CTX_init(CMAC_CTX *ctx);
+void Comcast_CMAC_CTX_init(Comcast_CMAC_CTX *ctx);
 /* End of Comcast: Added */
 
-void CMAC_CTX_cleanup(CMAC_CTX *ctx);
+void Comcast_CMAC_CTX_cleanup(Comcast_CMAC_CTX *ctx);
 /* Comcast: Removed
-void CMAC_CTX_free(CMAC_CTX *ctx);
+void Comcast_CMAC_CTX_free(Comcast_CMAC_CTX *ctx);
 */
-EVP_CIPHER_CTX *CMAC_CTX_get0_cipher_ctx(CMAC_CTX *ctx);
+EVP_CIPHER_CTX *Comcast_CMAC_CTX_get0_cipher_ctx(Comcast_CMAC_CTX *ctx);
 /* Comcast: Removed
-int CMAC_CTX_copy(CMAC_CTX *out, const CMAC_CTX *in);
+int Comcast_CMAC_CTX_copy(Comcast_CMAC_CTX *out, const Comcast_CMAC_CTX *in);
  */
 
-int CMAC_Init(CMAC_CTX *ctx, const void *key, size_t keylen,
+int Comcast_CMAC_Init(Comcast_CMAC_CTX *ctx, const void *key, size_t keylen,
             const EVP_CIPHER *cipher, ENGINE *impl);
-int CMAC_Update(CMAC_CTX *ctx, const void *data, size_t dlen);
-int CMAC_Final(CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen);
-int CMAC_resume(CMAC_CTX *ctx);
+int Comcast_CMAC_Update(Comcast_CMAC_CTX *ctx, const void *data, size_t dlen);
+int Comcast_CMAC_Final(Comcast_CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen);
+int Comcast_CMAC_resume(Comcast_CMAC_CTX *ctx);
 
 #ifdef  __cplusplus
 }

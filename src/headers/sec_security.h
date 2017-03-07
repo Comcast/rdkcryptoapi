@@ -49,6 +49,7 @@ extern "C"
 
 #define SEC_FREE(x) do { if ((x) != NULL) {free(x); x=NULL;} } while(0)
 #define SEC_RSA_FREE(x) do { if ((x) != NULL) {RSA_free(x); x=NULL;} } while(0)
+#define SEC_ECC_FREE(x) do { if ((x) != NULL) {EC_KEY_free(x); x=NULL;} } while(0)
 #define SEC_EVPPKEY_FREE(x) do { if ((x) != NULL) {EVP_PKEY_free(x); x=NULL;} } while(0)
 #define SEC_BIO_FREE(x) do { if ((x) != NULL) {BIO_free(x); x=NULL;} } while(0)
 #define SEC_X509_FREE(x) do { if ((x) != NULL) {X509_free(x); x=NULL;} } while(0)
@@ -74,6 +75,8 @@ extern "C"
         SEC_LOG_ERROR(#call " returned error"); \
         goto label; \
     }
+
+
 
 /**
  * @brief Initialize secure processor
@@ -157,6 +160,11 @@ Sec_Result SecProcessor_Release(Sec_ProcessorHandle* secProcHandle);
 Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
         Sec_CipherAlgorithm algorithm, Sec_CipherMode mode, Sec_KeyHandle* key,
         SEC_BYTE* iv, Sec_CipherHandle** cipherHandle);
+
+/**
+ * @brief Update the IV on the cipher handle
+ */
+Sec_Result SecCipher_UpdateIV(Sec_CipherHandle* cipherHandle, SEC_BYTE* iv);
 
 /**
  * @brief En/De-cipher specified input data into and output buffer
@@ -413,7 +421,7 @@ Sec_Result SecCertificate_Delete(Sec_ProcessorHandle* secProcHandle,
         SEC_OBJECTID object_id);
 
 /**
- * @brief Extract the public key information from the certificate
+ * @brief Extract the RSA public key information from the certificate
  *
  * @param cert_handle certificate handle
  * @param public_key pointer to the output structure that will be filled with
@@ -421,8 +429,21 @@ Sec_Result SecCertificate_Delete(Sec_ProcessorHandle* secProcHandle,
  *
  * @return The status of the operation
  */
-Sec_Result SecCertificate_ExtractPublicKey(Sec_CertificateHandle* cert_handle,
+Sec_Result SecCertificate_ExtractRSAPublicKey(Sec_CertificateHandle* cert_handle,
         Sec_RSARawPublicKey *public_key);
+
+/**
+ * @brief Extract the ECC public key information from the certificate
+ *
+ * @param cert_handle certificate handle
+ * @param public_key pointer to the output structure that will be filled with
+ * public key data
+ *
+ * @return The status of the operation
+ */
+Sec_Result SecCertificate_ExtractECCPublicKey(Sec_CertificateHandle* cert_handle,
+        Sec_ECCRawPublicKey *public_key);
+
 
 /**
  * @brief Verify certificate signature
@@ -444,8 +465,19 @@ Sec_Result SecCertificate_Verify(Sec_CertificateHandle* cert_handle,
  *
  * @return The status of the operation
  */
-Sec_Result SecCertificate_VerifyWithRawPublicKey(Sec_CertificateHandle* cert_handle,
+Sec_Result SecCertificate_VerifyWithRawRSAPublicKey(Sec_CertificateHandle* cert_handle,
         Sec_RSARawPublicKey* public_key);
+
+/**
+ * @brief Verify certificate signature - ECC
+ *
+ * @param cert_handle certificate handle
+ * @param public_key structure holding the public key information
+ *
+ * @return The status of the operation
+ */
+Sec_Result SecCertificate_VerifyWithRawECCPublicKey(Sec_CertificateHandle* cert_handle,
+        Sec_ECCRawPublicKey* public_key);
 
 /**
  * @brief Obtain the certificate data in clear text DER format
@@ -498,7 +530,7 @@ SEC_SIZE SecKey_GetKeyLen(Sec_KeyHandle* keyHandle);
  *
  * @param keyHandle key handle
  *
- * @return The status of the operation
+ * @return The key type or SEC_KEYTYPE_NUM if the key handle is invalid
  */
 Sec_KeyType SecKey_GetKeyType(Sec_KeyHandle* keyHandle);
 
@@ -515,15 +547,27 @@ Sec_Result SecKey_GetInstance(Sec_ProcessorHandle* secProcHandle,
         SEC_OBJECTID object_id, Sec_KeyHandle** keyHandle);
 
 /**
- * @brief Extract a public key from a specified private key handle
+ * @brief Extract an RSA public key from a specified private key handle
  *
  * @param key_handle handle of the private key
  * @param public_key pointer to the output structure containing the public rsa key
  *
  * @return The status of the operation
  */
-Sec_Result SecKey_ExtractPublicKey(Sec_KeyHandle* key_handle,
+Sec_Result SecKey_ExtractRSAPublicKey(Sec_KeyHandle* key_handle,
         Sec_RSARawPublicKey *public_key);
+
+/**
+ * @brief Extract an ECC public key from a specified private key handle
+ *
+ * @param key_handle handle of the private key
+ * @param public_key pointer to the output structure containing the public ecc key
+ *
+ * @return The status of the operation
+ */
+Sec_Result SecKey_ExtractECCPublicKey(Sec_KeyHandle* key_handle,
+        Sec_ECCRawPublicKey *public_key);
+
 
 /**
  * @brief Generate and provision a new key.
@@ -699,6 +743,31 @@ Sec_Result SecKey_ComputeBaseKeyDigest(Sec_ProcessorHandle* secProcHandle, SEC_B
  * @return Processor handle
  */
 Sec_ProcessorHandle* SecKey_GetProcessor(Sec_KeyHandle* key);
+
+/**
+ * @brief Generates a shared symmetric key and stores it in a specified location.
+ *
+ * A shared secret is calculated using the ECDH algorithm.  The shared
+ * secret is converted to a key using the Concat KDF (SP800-56A Section
+ * 5.8.1).  If the key with the same id already exists, the call will
+ * overwrite the existing key with the new key.  SHA-256 is the digest
+ * algorithm.
+ *
+ * @param keyHandle Handle of my private ECC key
+ * @param otherPublicKey Public key for other party in key agreement
+ * @param type_derived Type of key to generate. Only symmetric keys can be derived
+ * @param id_derived 64-bit object id identifying the key to be generated
+ * @param loc_id Location where the resulting key will be stored
+ * @param digestAlgorithm Digest algorithm to use in KDF (typically SEC_DIGESTALGORITHM_SHA256)
+ * @param otherInfo Input keying material
+ *        AlgorithmID || PartyUInfo || PartyVInfo {|| SuppPubInfo }{|| SuppPrivInfo}
+ * @param otherInfoSize	Size of otherInfo (in bytes)
+ */
+Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
+        Sec_ECCRawPublicKey* otherPublicKey, Sec_KeyType type_derived,
+        SEC_OBJECTID id_derived, Sec_StorageLoc loc_derived,
+        Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *otherInfo,
+        SEC_SIZE otherInfoSize);
 
 /**
  * @brief Obtain a handle to a provisioned bundle

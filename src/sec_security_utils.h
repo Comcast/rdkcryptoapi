@@ -104,7 +104,7 @@ SEC_BOOL SecUtils_FileExists(const char *path);
 
 typedef struct
 {
-    char name[256];
+    char name[SEC_MAX_FILE_PATH_LEN];
     SEC_BYTE is_dir;
 } Sec_LsDirEntry;
 
@@ -178,18 +178,71 @@ RSA* SecUtils_RSAFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC
 
 SEC_BOOL SecUtils_RSAHasPriv(RSA *rsa);
 
+SEC_BOOL SecUtils_ECCIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
+
+EC_KEY* SecUtils_ECCFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
+
+SEC_BOOL SecUtils_ECCHasPriv(EC_KEY *ec_key);
+
+/**
+ * @brief Obtain an OpenSSL EC_KEY object from the private key binary blob
+ */
+EC_KEY *SecUtils_ECCFromOnlyPrivBinary(Sec_ECCRawOnlyPrivateKey *binary);
+
+/**
+ * @brief Obtain an OpenSSL EC_KEY object from the private key binary blob
+ */
+EC_KEY *SecUtils_ECCFromPrivBinary(Sec_ECCRawPrivateKey *binary);
+
+/**
+ * @brief Obtain an OpenSSL EC_KEY object from the public key binary blob
+ */
+EC_KEY *SecUtils_ECCFromPubBinary(Sec_ECCRawPublicKey *binary);
+
+/**
+ * @brief Write OpenSSL EC_KEY object into a private key binary blob
+ *
+ * The private key also contains the public key
+ */
+Sec_Result SecUtils_ECCToPrivBinary(EC_KEY *ec_key, Sec_ECCRawPrivateKey *binary);
+
+/**
+ * @brief Write OpenSSL EC_KEY object into a public key binary blob
+ */
+Sec_Result SecUtils_ECCToPubBinary(EC_KEY *ec_key, Sec_ECCRawPublicKey *binary);
+
+EC_KEY *SecUtils_ECCFromDERPriv(SEC_BYTE *der, SEC_SIZE der_len);
+EC_KEY *SecUtils_ECCFromPEMPriv(SEC_BYTE *pem, SEC_SIZE pem_len);
+EC_KEY *SecUtils_ECCFromDERPub(SEC_BYTE *der, SEC_SIZE der_len);
+EC_KEY *SecUtils_ECCFromPEMPub(SEC_BYTE *pem, SEC_SIZE pem_len);
+Sec_Result SecUtils_ECCToDERPriv(EC_KEY *ec_key, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written);
+Sec_Result SecUtils_ECCToDERPrivKeyInfo(EC_KEY *ec_key, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written);
+Sec_Result SecUtils_ECCToDERPubKey(EC_KEY *ec_key, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written);
+
+int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize, BIGNUM *sender_rand);
+int SecUtils_ElGamal_Encrypt(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize);
+int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize);
+
 /**
  * @brief Write an OpenSSL X509 object in DER format
  */
 SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem);
 
+X509 * SecUtils_DerToX509(SEC_BYTE *der, SEC_SIZE der_len);
 SEC_SIZE SecUtils_X509ToDerLen(X509 *x509, void *mem, SEC_SIZE mem_len);
 
 /**
  * @brief Verify X509 certificate with public RSA key
  */
-Sec_Result SecUtils_VerifyX509WithRawPublicKey(
+Sec_Result SecUtils_VerifyX509WithRawRSAPublicKey(
         X509 *x509, Sec_RSARawPublicKey* public_key);
+
+/**
+ * @brief Verify X509 certificate with public ECC key
+ */
+Sec_Result SecUtils_VerifyX509WithRawECCPublicKey(
+        X509 *x509, Sec_ECCRawPublicKey* public_key);
+
 
 /**
  * @brief Increment the AES 128-bit counter
@@ -226,9 +279,66 @@ SEC_SIZE SecUtils_UpdateItemList(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_
  */
 SEC_SIZE SecUtils_UpdateItemListFromDir(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_SIZE numItems, const char* dir, const char* ext);
 
-Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, Sec_KeyType wrappedType, SEC_BYTE *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
-Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
-Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+
+Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc,
+                                 SEC_OBJECTID wrappingKey,
+                                 Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                 SEC_BYTE *payload, SEC_SIZE payloadLen,
+                                 SEC_BYTE *out, SEC_SIZE out_len,
+                                 SEC_SIZE *written);
+
+Sec_Result SecUtils_WrapECCPriv(Sec_ProcessorHandle *proc,
+                                SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                EC_KEY *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+
+Sec_Result SecUtils_WrapECCPrivKeyInfo(Sec_ProcessorHandle *proc,
+                                       SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                       EC_KEY *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+
+Sec_Result SecUtils_WrapRawECCPriv(Sec_ProcessorHandle *proc,
+                                   SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                   const EC_KEY *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+
+Sec_Result SecUtils_WrapRawECCPrivKeyInfo(Sec_ProcessorHandle *proc,
+                                          SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                          const EC_KEY *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
+
+/**
+ * @brief Get the key type of the specified OpenSSL EC_GROUP
+ *
+ * @param EC_GROUP Group for which a key type is needed
+ *
+ * @return The key type or SEC_KEYTYPE_NUM if EC_GROUP is invalid
+ */
+Sec_KeyType SecKey_GroupToKeyType(const EC_GROUP *group);
+
+/**
+ * @brief Debugging functions
+ */
+void EC_POINT_dump(const EC_POINT *ec_point);
+void EC_KEY_dump(const EC_KEY *ec_key);
+void BN_dump(const BIGNUM *bn);
+
+/**
+ * @brief Extracts the X and Y coordinates from an EC_KEY
+ *
+ * @param ec_key The ec_key to extract from
+ * @param xp Pointer to a Point to the X coordinate.  May not be NULL.
+ * @param yp Pointer to a Point to the Y coordinate.  May be NULL if you don't
+ *           need the Y coordinate.
+ * @param keyTypep Optional pointer to the key type.  May be NULL.
+ *
+ * This calls BN_new() to allocate *xp and optionally *yp.
+ * If this returns ok, then the caller is responsible to call BN_free() on *xp
+ * and, if valid, *yp.
+ *
+ * @return status of the operation
+ */
+Sec_Result SecUtils_Extract_EC_KEY_X_Y(const EC_KEY *ec_key,
+                                       BIGNUM **xp, BIGNUM **yp,
+                                       Sec_KeyType *keyTypep);
 
 #ifdef __cplusplus
 }

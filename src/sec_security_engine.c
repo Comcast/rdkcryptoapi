@@ -248,7 +248,6 @@ void Sec_InitOpenSSL(void)
     if (!g_sec_openssl_inited)
     {
         ERR_load_crypto_strings();
-        ERR_load_crypto_strings();
         OpenSSL_add_all_algorithms();
         OpenSSL_add_all_ciphers();
         OpenSSL_add_all_digests();
@@ -280,9 +279,9 @@ RSA* SecKey_ToEngineRSA(Sec_KeyHandle *key)
         return NULL;
     }
 
-    if (SEC_RESULT_SUCCESS != SecKey_ExtractPublicKey(key, &pubKey))
+    if (SEC_RESULT_SUCCESS != SecKey_ExtractRSAPublicKey(key, &pubKey))
     {
-        SEC_LOG_ERROR("SecKey_ExtractPublicKey failed");
+        SEC_LOG_ERROR("SecKey_ExtractRSAPublicKey failed");
         return NULL;
     }
 
@@ -314,9 +313,9 @@ RSA* SecKey_ToEngineRSAWithCert(Sec_KeyHandle *key, Sec_CertificateHandle *cert)
         return NULL;
     }
 
-    if (SEC_RESULT_SUCCESS != SecCertificate_ExtractPublicKey(cert, &pubKey))
+    if (SEC_RESULT_SUCCESS != SecCertificate_ExtractRSAPublicKey(cert, &pubKey))
     {
-        SEC_LOG_ERROR("SecKey_ExtractPublicKey failed");
+        SEC_LOG_ERROR("SecKey_ExtractRSAPublicKey failed");
         return NULL;
     }
 
@@ -333,6 +332,12 @@ RSA* SecKey_ToEngineRSAWithCert(Sec_KeyHandle *key, Sec_CertificateHandle *cert)
     RSA_set_app_data(rsa, key);
 
     return rsa;
+}
+
+EC_KEY* SecKey_ToEngineEcc(Sec_KeyHandle *key)
+{
+    SEC_LOG_ERROR("SecKey_ToEngineEcc is not implemented"); // support first appears in OpenSSL 1.0.2 and is not ready for us
+    return NULL;
 }
 
 X509 * SecCertificate_DerToX509(void *mem, SEC_SIZE len)

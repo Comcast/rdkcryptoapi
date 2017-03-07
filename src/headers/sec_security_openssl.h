@@ -25,7 +25,11 @@
 #include <openssl/aes.h>
 #include <openssl/evp.h>
 #include <openssl/hmac.h>
+#include <openssl/ec.h>
+#include <openssl/ecdh.h>
+#include <openssl/ecdsa.h>
 #include "sec_cmac.h"
+
 
 #ifdef __cplusplus
 extern "C"
@@ -144,7 +148,7 @@ struct Sec_MacHandle_struct
     union
     {
         HMAC_CTX hmac_ctx;
-        CMAC_CTX cmac_ctx;
+        Comcast_CMAC_CTX cmac_ctx;
     };
 };
 
@@ -202,12 +206,12 @@ struct Sec_ProcessorHandle_struct
 };
 
 typedef Sec_Result (*SecOpenSSL_CustomProcessKeyContainer)(Sec_ProcessorHandle *proc,
-        _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
-        SEC_SIZE data_len, SEC_OBJECTID objectId);
+    _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
+    SEC_SIZE data_len, SEC_OBJECTID objectId);
 void SecOpenssl_RegisterCustomProcessKeyContainer(SecOpenSSL_CustomProcessKeyContainer func);
 Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
-        _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
-        SEC_SIZE data_len, SEC_OBJECTID objectId);
+    _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
+    SEC_SIZE data_len, SEC_OBJECTID objectId);
 
 #ifdef __cplusplus
 }

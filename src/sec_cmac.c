@@ -79,10 +79,10 @@ static void make_kn(unsigned char *k1, unsigned char *l, int bl)
     }
 
 /* Comcast: Removed
-CMAC_CTX *CMAC_CTX_new(void)
+Comcast_CMAC_CTX *Comcast_CMAC_CTX_new(void)
     {
-    CMAC_CTX *ctx;
-    ctx = OPENSSL_malloc(sizeof(CMAC_CTX));
+    Comcast_CMAC_CTX *ctx;
+    ctx = OPENSSL_malloc(sizeof(Comcast_CMAC_CTX));
     if (!ctx)
         return NULL;
     EVP_CIPHER_CTX_init(&ctx->cctx);
@@ -92,14 +92,14 @@ CMAC_CTX *CMAC_CTX_new(void)
     */
 
 /* Comcast: Added */
-void CMAC_CTX_init(CMAC_CTX *ctx)
+void Comcast_CMAC_CTX_init(Comcast_CMAC_CTX *ctx)
 {
     EVP_CIPHER_CTX_init(&ctx->cctx);
     ctx->nlast_block = -1;
 }
 /* End of Comcast: Added */
 
-void CMAC_CTX_cleanup(CMAC_CTX *ctx)
+void Comcast_CMAC_CTX_cleanup(Comcast_CMAC_CTX *ctx)
     {
 #ifdef OPENSSL_FIPS
     if (FIPS_mode() && !ctx->cctx.engine)
@@ -116,19 +116,19 @@ void CMAC_CTX_cleanup(CMAC_CTX *ctx)
     ctx->nlast_block = -1;
     }
 
-EVP_CIPHER_CTX *CMAC_CTX_get0_cipher_ctx(CMAC_CTX *ctx)
+EVP_CIPHER_CTX *Comcast_CMAC_CTX_get0_cipher_ctx(Comcast_CMAC_CTX *ctx)
     {
     return &ctx->cctx;
     }
 
 /* Comcast: Removed
-void CMAC_CTX_free(CMAC_CTX *ctx)
+void Comcast_CMAC_CTX_free(Comcast_CMAC_CTX *ctx)
     {
-    CMAC_CTX_cleanup(ctx);
+    Comcast_CMAC_CTX_cleanup(ctx);
     OPENSSL_free(ctx);
     }
 
-int CMAC_CTX_copy(CMAC_CTX *out, const CMAC_CTX *in)
+int Comcast_CMAC_CTX_copy(Comcast_CMAC_CTX *out, const Comcast_MAC_CTX *in)
     {
     int bl;
     if (in->nlast_block == -1)
@@ -145,7 +145,7 @@ int CMAC_CTX_copy(CMAC_CTX *out, const CMAC_CTX *in)
     }
     */
 
-int CMAC_Init(CMAC_CTX *ctx, const void *key, size_t keylen,
+int Comcast_CMAC_Init(Comcast_CMAC_CTX *ctx, const void *key, size_t keylen,
             const EVP_CIPHER *cipher, ENGINE *impl)
     {
     static unsigned char zero_iv[EVP_MAX_BLOCK_LENGTH];
@@ -208,7 +208,7 @@ int CMAC_Init(CMAC_CTX *ctx, const void *key, size_t keylen,
     return 1;
     }
 
-int CMAC_Update(CMAC_CTX *ctx, const void *in, size_t dlen)
+int Comcast_CMAC_Update(Comcast_CMAC_CTX *ctx, const void *in, size_t dlen)
     {
     size_t i;
     /* Comcast: Added */
@@ -273,7 +273,7 @@ int CMAC_Update(CMAC_CTX *ctx, const void *in, size_t dlen)
 
     }
 
-int CMAC_Final(CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen)
+int Comcast_CMAC_Final(Comcast_CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen)
     {
     /* Comcast: Added */
     unsigned char y[EVP_MAX_BLOCK_LENGTH];
@@ -319,7 +319,7 @@ int CMAC_Final(CMAC_CTX *ctx, unsigned char *out, unsigned int *poutlen)
     return 1;
     }
 
-int CMAC_resume(CMAC_CTX *ctx)
+int Comcast_CMAC_resume(Comcast_CMAC_CTX *ctx)
     {
     if (ctx->nlast_block == -1)
         return 0;

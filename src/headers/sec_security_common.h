@@ -30,6 +30,7 @@
 #include "sec_security_asn1kc.h"
 #endif
 #include <openssl/rsa.h>
+#include <openssl/ec.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -147,6 +148,24 @@ int Sec_Memcmp(const void* ptr1, const void* ptr2, const size_t num);
 void *Sec_Memset(void *ptr, int value, size_t num);
 
 /**
+ * @brief Check whether the mode is any form of encrypt
+ *
+ * @param mode cipher mode
+ *
+ * @return 1 if encrypt, else 0
+ */
+int SecCipher_IsModeEncrypt(Sec_CipherMode mode);
+
+/**
+ * @brief Check whether the mode is any form of decrypt
+ *
+ * @param mode cipher mode
+ *
+ * @return 1 if decrypt, else 0
+ */
+int SecCipher_IsModeDecrypt(Sec_CipherMode mode);
+
+/**
  * @brief Check whether the supplied key and iv are valid for the chosen cipher algorithm
  *
  * @param key_type key type
@@ -163,6 +182,10 @@ SEC_BOOL SecCipher_IsCBC(Sec_CipherAlgorithm alg);
 
 /**
  * @brief get the required output buffer size for the specified combination of input parameters
+ *
+ * Write required output buffer size for cipher configuration.
+ * Returns SEC_RESULT_SUCCESS if the cipher configuration parameters are valid.
+ * Returns SEC_RESULT_FAILURE otherwise (e.g. input size is not valid).
  *
  * @param algorithm cipher algorithm
  * @param mode cipher mode
@@ -216,6 +239,11 @@ SEC_BOOL SecCipher_IsAES(Sec_CipherAlgorithm alg);
  */
 SEC_BOOL SecCipher_IsRsa(Sec_CipherAlgorithm alg);
 
+/**
+ * @brief Checks whether the specified cipher algorithm is ECC
+ */
+SEC_BOOL SecCipher_IsEcc(Sec_CipherAlgorithm alg);
+
 Sec_Result SecCipher_SingleInput(Sec_ProcessorHandle *proc,
         Sec_CipherAlgorithm alg, Sec_CipherMode mode, Sec_KeyHandle *key,
         SEC_BYTE *iv, SEC_BYTE *input, SEC_SIZE input_len, SEC_BYTE *output,
@@ -240,6 +268,33 @@ SEC_BOOL SecCipher_IsDecrypt(Sec_CipherMode mode);
  */
 Sec_Result SecSignature_IsValidKey(Sec_KeyType key_type,
         Sec_SignatureAlgorithm algorithm, Sec_SignatureMode mode);
+
+/**
+ * @brief Returns TRUE if the signature algorithm is an RSA variant
+ *
+ * @param alg signing algorithm
+ *
+ * @return true if RSA
+ */
+SEC_BOOL SecSignature_IsRsa(Sec_SignatureAlgorithm alg);
+
+/**
+ * @brief Returns TRUE if the signature algorithm is an ECC variant
+ *
+ * @param alg signing algorithm
+ *
+ * @return true if ECC
+ */
+SEC_BOOL SecSignature_IsEcc(Sec_SignatureAlgorithm alg);
+
+/**
+ * @brief Returns the size of the algorithm's ECC signature
+ *
+ * @param alg signing algorithm
+ *
+ * @return size in bytes or 0 if unsupported algorithm
+ */
+SEC_SIZE SecSignature_GetEccSignatureSize(Sec_SignatureAlgorithm alg);
 
 /**
  * @brief Obtain a digest algorithm used by a specific signing algorithm
@@ -330,7 +385,7 @@ SEC_BOOL SecKey_IsSymetric(Sec_KeyType type);
 SEC_BOOL SecKey_IsAES(Sec_KeyType type);
 
 /**
- * @brief Checks if a passed in key type is Rsa
+ * @brief Checks if a passed in key type is RSA
  *
  * @param type key type
  *
@@ -339,7 +394,7 @@ SEC_BOOL SecKey_IsAES(Sec_KeyType type);
 SEC_BOOL SecKey_IsRsa(Sec_KeyType type);
 
 /**
- * @brief Checks if a passed in key type is pub Rsa
+ * @brief Checks if a passed in key type is pub RSA
  *
  * @param type key type
  *
@@ -348,13 +403,40 @@ SEC_BOOL SecKey_IsRsa(Sec_KeyType type);
 SEC_BOOL SecKey_IsPubRsa(Sec_KeyType type);
 
 /**
- * @brief Checks if a passed in key type is priv Rsa
+ * @brief Checks if a passed in key type is priv RSA
  *
  * @param type key type
  *
  * @return 1 if key type is priv rsa, 0 otherwise
  */
 SEC_BOOL SecKey_IsPrivRsa(Sec_KeyType type);
+
+/**
+ * @brief Checks if a passed in key type is ECC
+ *
+ * @param type key type
+ *
+ * @return 1 if key type is priv ECC, 0 otherwise
+ */
+SEC_BOOL SecKey_IsEcc(Sec_KeyType type);
+
+/**
+ * @brief Checks if a passed in key type is priv ECC
+ *
+ * @param type key type
+ *
+ * @return 1 if key type is priv ECC, 0 otherwise
+ */
+SEC_BOOL SecKey_IsPrivEcc(Sec_KeyType type);
+
+/**
+ * @brief Checks if a passed in key type is pub ECC
+ *
+ * @param type key type
+ *
+ * @return 1 if key type is pub ECC, 0 otherwise
+ */
+SEC_BOOL SecKey_IsPubEcc(Sec_KeyType type);
 
 /**
  * @brief Obtain a key length in bytes for a specified key type.
@@ -497,6 +579,13 @@ RSA* SecKey_ToEngineRSA(Sec_KeyHandle *key);
 RSA* SecKey_ToEngineRSAWithCert(Sec_KeyHandle *key, Sec_CertificateHandle *cert);
 
 /**
+ * @brief Obtain an OpenSSL EC key from the Security API key handle.  This EC
+ * key will support performing EC encrypt/decrypt/sign/verify operations in hardware
+ * when used by OpenSSL functions.
+ */
+EC_KEY* SecKey_ToEngineEcc(Sec_KeyHandle *key);
+
+/**
  * @brief Load an OpenSSL X509 object from a DER format
  */
 X509 * SecCertificate_DerToX509(void *mem, SEC_SIZE len);
@@ -520,9 +609,16 @@ SEC_BOOL SecCertificate_IsProvisioned(Sec_ProcessorHandle* secProcHandle,
 /**
  * @brief Obtain the size of the certificate in DER format
  *
- * @param cert_handle certificate whose size we want to obtain
+ * @param certHandle certificate whose size we want to obtain
  */
-SEC_SIZE SecCertificate_GetSize(Sec_CertificateHandle* cert_handle);
+SEC_SIZE SecCertificate_GetSize(Sec_CertificateHandle* certHandle);
+
+/**
+ * @brief Returns the key type of the public key contained in a certificate.
+ *
+ * @param certHandle Handle of a certificate whose type will be returned
+ */
+Sec_KeyType SecCertificate_GetKeyType(Sec_CertificateHandle* certHandle);
 
 /**
  * @brief finds the first available certificate id in the range passed in
@@ -618,6 +714,28 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1(Sec_Asn1KC *kc,
 Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Buffer(SEC_BYTE *asn1, SEC_SIZE asn1_len,
         SEC_BYTE *wrappedKey, SEC_SIZE wrappedKeyLen, SEC_SIZE *written,
         Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg);
+
+
+/**
+ * @brief Generate an Asn1 key container for wrapped keys
+ */
+Sec_Result SecKey_GenerateWrappedKeyAsn1Off(SEC_BYTE *payload, SEC_SIZE payloadLen, Sec_KeyType wrappedKeyType,
+                                         SEC_OBJECTID wrappingKeyId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
+                                         SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset);
+
+/**
+ * @brief Extract wrapped key params from ASN1KC
+ */
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
+                                              SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                              Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset);
+
+/**
+ * @brief Extract wrapped key params from ASN1KC buffer
+ */
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferOff(SEC_BYTE *asn1, SEC_SIZE asn1_len,
+                                                       SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                                       Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset);
 
 #endif
 

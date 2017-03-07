@@ -18,6 +18,7 @@
 #define SEC_SECURITY_DATATYPE_H_
 
 #include <stdint.h>
+#include <sys/param.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -59,39 +60,45 @@ extern "C"
 #define SEC_MAX(a,b) (((a)<(b))?(b):(a))
 #endif
 
-#define SEC_MAX_FILE_PATH_LEN 4096
+#define SEC_MAX_FILE_PATH_LEN MAXPATHLEN
 
-/* maximum length of a digest value */
+/* maximum length of a digest value (in bytes) */
 #define SEC_DIGEST_MAX_LEN 32
 
-/* maximum length of a MAC value */
+/* maximum length of a MAC value (in bytes) */
 #define SEC_MAC_MAX_LEN 32
 
-/* maximum length of a MAC key */
+/* maximum length of a MAC key (in bytes) */
 #define SEC_MAC_KEY_MAX_LEN 32
 
-/* maximum length of an RSA key modulus */
+/* maximum length of an RSA key modulus (in bytes) */
 #define SEC_RSA_KEY_MAX_LEN 256
 
-/* maximum length of a signature value */
+/* length of an NIST_P256 ECC key */
+#define SEC_ECC_NISTP256_KEY_LEN 32
+
+/* maximum length of an ECC point coordinate (in bytes) */
+#define SEC_EC_KEY_MAX_LEN 80
+
+/* maximum length of a signature value (in bytes) */
 #define SEC_SIGNATURE_MAX_LEN SEC_RSA_KEY_MAX_LEN
 
-/* maximum length of an AES key */
+/* maximum length of an AES key (in bytes) */
 #define SEC_AES_KEY_MAX_LEN 32
 
-/* aes block size */
+/* aes block size (in bytes) */
 #define SEC_AES_BLOCK_SIZE 16
 
-/* maximum length of a symetric key (AES or MAC) */
+/* maximum length of a symetric key (AES or MAC) (in bytes) */
 #define SEC_SYMETRIC_KEY_MAX_LEN SEC_MAX(SEC_AES_KEY_MAX_LEN, SEC_MAC_KEY_MAX_LEN)
 
-/* maximum length of the IV value */
+/* maximum length of the IV value (in bytes) */
 #define SEC_CIPHER_IV_MAX_LEN SEC_AES_KEY_MAX_LEN
 
-/* the length of the device id */
+/* the length of the device id (in bytes) */
 #define SEC_DEVICEID_LEN 8
 
-/* the length of client nonce */
+/* the length of client nonce (in bytes) */
 #define SEC_NONCE_LEN 20
 
 /* fixed reserved ids */
@@ -140,7 +147,7 @@ extern "C"
 #define SEC_CERT_FILENAME_EXT ".cert"
 #define SEC_BUNDLE_FILENAME_EXT ".bin"
 
-#define SEC_KEYCONTAINER_MAX_LEN (1024 * 16)
+#define SEC_KEYCONTAINER_MAX_LEN (1024 * 4)
 #define SEC_BUNDLE_MAX_LEN (1024 * 128)
 #define SEC_CERT_MAX_DATA_LEN (1024 * 64)
 
@@ -153,6 +160,7 @@ extern "C"
 #define SEC_ASN1KC_WRAPPINGKEYID "WrappingKeyId"
 #define SEC_ASN1KC_WRAPPINGIV "WrappingIV"
 #define SEC_ASN1KC_WRAPPINGALGORITHMID "WrappingAlgorithmId"
+#define SEC_ASN1KC_WRAPPEDKEYOFFSET "WrappedKeyOffset"
 
 /*****************************************************************************
  * EXPORTED TYPES
@@ -163,11 +171,15 @@ typedef uint8_t SEC_BOOL;
 typedef uint32_t SEC_SIZE;
 typedef uint64_t SEC_OBJECTID;
 
+// A general note for all the enums below:
+// the ..._NUM value must be the last defined.  It is returned to indicate
+// an invalid value
+
 typedef enum
 {
     SEC_KEYLADDERROOT_UNIQUE,
     SEC_KEYLADDERROOT_SHARED,
-    SEC_KEYLADDERROOT_NUM,
+    SEC_KEYLADDERROOT_NUM
 } Sec_KeyLadderRoot;
 
 /**
@@ -183,6 +195,7 @@ typedef enum
     SEC_CIPHERALGORITHM_AES_CTR,
     SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING,
     SEC_CIPHERALGORITHM_RSA_OAEP_PADDING,
+    SEC_CIPHERALGORITHM_ECC_ELGAMAL,
     SEC_CIPHERALGORITHM_NUM
 } Sec_CipherAlgorithm;
 
@@ -201,6 +214,8 @@ typedef enum
     SEC_KEYTYPE_HMAC_128,
     SEC_KEYTYPE_HMAC_160,
     SEC_KEYTYPE_HMAC_256,
+    SEC_KEYTYPE_ECC_NISTP256,
+    SEC_KEYTYPE_ECC_NISTP256_PUBLIC,
     SEC_KEYTYPE_NUM
 } Sec_KeyType;
 
@@ -238,6 +253,13 @@ typedef enum
     SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC,
     SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC,
     SEC_KEYCONTAINER_ASN1,
+    SEC_KEYCONTAINER_PEM_ECC_NISTP256,          // Clear private ECC key, NIST P256 curve, in PEM format
+    SEC_KEYCONTAINER_PEM_ECC_NISTP256_PUBLIC,   // Clear public ECC key, NIST P256 curve, in PEM format
+    SEC_KEYCONTAINER_RAW_ECC_PRIVONLY_NISTP256, // Clear private ECC key, NIST P256 curve, as 32 byte value
+    SEC_KEYCONTAINER_RAW_ECC_NISTP256,          // Clear private ECC key, NIST P256 curve, in Sec_ECCRawPrivateKey format
+    SEC_KEYCONTAINER_RAW_ECC_NISTP256_PUBLIC,   // Clear public ECC key, NIST P256 curve, in Sec_ECCRawPublicKey format
+    SEC_KEYCONTAINER_DER_ECC_NISTP256,
+    SEC_KEYCONTAINER_DER_ECC_NISTP256_PUBLIC,
     SEC_KEYCONTAINER_NUM
 } Sec_KeyContainer;
 
@@ -290,6 +312,8 @@ typedef enum
     SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS,
     SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST,
     SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST,
+    SEC_SIGNATUREALGORITHM_ECDSA_NISTP256,
+    SEC_SIGNATUREALGORITHM_ECDSA_NISTP256_DIGEST,
     SEC_SIGNATUREALGORITHM_NUM
 } Sec_SignatureAlgorithm;
 
@@ -397,6 +421,51 @@ typedef struct
     SEC_BYTE e[4];
     SEC_BYTE modulus_len_be[4];
 } Sec_RSARawPublicKey;
+
+/**
+ * @brief Raw Private EC key data
+ *
+ * Note: A prv value need not be on the curve. A prv value is simply
+ * an integer multiplier k that tells how many times to add the
+ * universal public point P (on the curve) to itself get the
+ * corresponding private point. An ECC private key for the NIST
+ * 256-curve would be 256-bits.  For that curve, prv is simply a
+ * random 256-bit number. prv can be gotten by a call to a sound
+ * random number generator, e.g. genrandom(256) and anything that
+ * comes out is valid.
+ *
+ */
+typedef struct
+{
+    Sec_KeyType type;	     // curve parameters indicated by key type
+    SEC_BYTE x[SEC_EC_KEY_MAX_LEN];
+    SEC_BYTE y[SEC_EC_KEY_MAX_LEN];
+    SEC_BYTE prv[SEC_EC_KEY_MAX_LEN];
+    SEC_BYTE key_len[4];     // length in bytes of x (same as y and prv)
+} Sec_ECCRawPrivateKey;
+
+/**
+ * @brief Raw Public EC key data
+ *
+ */
+typedef struct
+{
+    Sec_KeyType type;	     // curve parameters indicated by key type
+    SEC_BYTE x[SEC_EC_KEY_MAX_LEN];
+    SEC_BYTE y[SEC_EC_KEY_MAX_LEN];
+    SEC_BYTE key_len[4];     // length in bytes of x (same as y and prv)
+} Sec_ECCRawPublicKey;
+
+/**
+ * @brief Raw ONLY Private EC key data
+ *
+ * This contains just a 256-bit [32 byte] ECC private key.
+ * $$$ If we add more ECC key types, will need to modify this.
+ */
+typedef struct
+{
+    SEC_BYTE prv[SEC_ECC_NISTP256_KEY_LEN];
+} Sec_ECCRawOnlyPrivateKey;
 
 /**
  * @brief Opaque processor initialization parameters
