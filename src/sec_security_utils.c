@@ -1648,12 +1648,16 @@ Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *d
     int type;
 
     if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST)
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST)
     {
         type = NID_sha1;
     }
     else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST)
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST)
     {
         type = NID_sha256;
     }
@@ -1709,10 +1713,26 @@ Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, 
         return SEC_RESULT_FAILURE;
     }
 
-    if (!RSA_padding_add_PKCS1_type_1((SEC_BYTE *) padded, keySize,
-                                      (SEC_BYTE *) temp_padded, temp_padded_len))
-    {
-        SEC_LOG_ERROR("RSA_padding_add_PKCS1_type_1 failed");
+    if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST) {
+
+        if (!RSA_padding_add_PKCS1_type_1((SEC_BYTE *) padded, keySize,
+                                          (SEC_BYTE *) temp_padded, temp_padded_len))
+        {
+            SEC_LOG_ERROR("RSA_padding_add_PKCS1_type_1 failed");
+            return SEC_RESULT_FAILURE;
+        }
+    } else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST) {
+
+        SEC_LOG_ERROR("PSS padding cannot be applied without the key");
+        return SEC_RESULT_FAILURE;
+    } else {
+        SEC_LOG_ERROR("Unknown signing algorithm detected: %d", alg);
         return SEC_RESULT_FAILURE;
     }
 

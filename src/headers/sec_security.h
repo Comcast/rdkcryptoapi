@@ -702,6 +702,17 @@ Sec_Result SecKey_Derive_KeyLadderAes128(Sec_ProcessorHandle* secProcHandle,
         SEC_OBJECTID object_id_derived, Sec_StorageLoc loc_derived,
         Sec_KeyLadderRoot root, SEC_BYTE *input1, SEC_BYTE *input2, SEC_BYTE *input3, SEC_BYTE *input4);
 
+Sec_Result SecKey_Derive_CMAC_AES128(
+    Sec_ProcessorHandle* secProcHandle,
+    SEC_OBJECTID idDerived,
+    Sec_KeyType typeDerived,
+    Sec_StorageLoc locDerived,
+    SEC_OBJECTID derivationKey,
+    SEC_BYTE *otherData,
+    SEC_SIZE otherDataSize,
+    SEC_BYTE* counter,
+    SEC_SIZE counterSize);
+
 /**
  * @brief Delete a provisioned key
  *

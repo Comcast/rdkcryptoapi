@@ -691,38 +691,9 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
     }
 
     if (data_type == SEC_KEYCONTAINER_SOC) {
-		/* we will just use DER formatted RSA keys as the SOC keys for this implementation */
-    	rsa = SecUtils_RSAFromDERPriv(data, data_len);
-    	if (rsa != NULL) {
-        	if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc, key_data,
-    				RSA_size(rsa) == 128 ? SEC_KEYCONTAINER_DER_RSA_1024 : SEC_KEYCONTAINER_DER_RSA_2048,
-    				data, data_len, objectId)) {
-        		SEC_RSA_FREE(rsa);
-        		SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
-        		return SEC_RESULT_FAILURE;
-        	}
-
-    		SEC_RSA_FREE(rsa);
-        	return SEC_RESULT_SUCCESS;
-    	}
-
-    	ec_key = SecUtils_ECCFromDERPriv(data, data_len);
-    	if (ec_key != NULL) {
-        	if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc, key_data,
-        			SEC_KEYCONTAINER_DER_ECC_NISTP256,
-    				data, data_len, objectId)) {
-        		SEC_ECC_FREE(ec_key);
-        		SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
-        		return SEC_RESULT_FAILURE;
-        	}
-
-        	SEC_ECC_FREE(ec_key);
-        	return SEC_RESULT_SUCCESS;
-    	}
-
-    	SEC_LOG_ERROR("Invalid SOC container encountered");
-    	return SEC_RESULT_FAILURE;
-
+        return SecOpenSSL_ProcessKeyContainer(proc,
+                                        key_data, SEC_KEYCONTAINER_ASN1,
+                                        data, data_len, objectId);
     }
 
     if (data_type == SEC_KEYCONTAINER_RAW_ECC_NISTP256)
@@ -2360,6 +2331,8 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
     EC_KEY *ec_key = NULL;
     int openssl_digest;
     int openssl_res;
+    SEC_BYTE em[256];
+    SEC_BYTE decrypted[256];
 
     CHECK_HANDLE(signatureHandle);
 
@@ -2394,10 +2367,14 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
     {
         case SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS:
         case SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST:
+        case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS:
+        case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST:
             openssl_digest = NID_sha1;
             break;
         case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS:
         case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST:
+        case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS:
+        case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST:
         case SEC_SIGNATUREALGORITHM_ECDSA_NISTP256:
         case SEC_SIGNATUREALGORITHM_ECDSA_NISTP256_DIGEST:
             openssl_digest = NID_sha256;
@@ -2417,8 +2394,30 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
                 return SEC_RESULT_FAILURE;
             }
 
-        openssl_res = RSA_sign(openssl_digest, digest, digest_len, signature, &sig_size, rsa);
-            *signatureSize = sig_size;
+            if (signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST) {
+
+                //pss padding
+                if (!RSA_padding_add_PKCS1_PSS(rsa, em, digest, (openssl_digest == NID_sha1) ? EVP_sha1() : EVP_sha256(), (openssl_digest == NID_sha1) ? 20 : 32)) {
+                    SEC_RSA_FREE(rsa);
+                    SEC_LOG_ERROR("RSA_padding_add_PKCS1_PSS failed with error %s", ERR_error_string(ERR_get_error(), NULL));
+                    return SEC_RESULT_FAILURE;
+                }
+
+                /* perform digital signature */
+                if (RSA_private_encrypt(RSA_size(rsa), em, signature, rsa, RSA_NO_PADDING) == -1) {
+                    openssl_res = 0;
+                } else {
+                    openssl_res = 1;                    
+                }
+                *signatureSize = RSA_size(rsa);
+            } else {
+                //pkcs15
+                openssl_res = RSA_sign(openssl_digest, digest, digest_len, signature, &sig_size, rsa);
+                *signatureSize = sig_size;
+            }
 
             SEC_RSA_FREE(rsa);
 
@@ -2481,8 +2480,7 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
         /* extract pub key; RSA or ECC as specified */
         if (SecSignature_IsRsa(signatureHandle->algorithm))
         {
-            res = SecKey_ExtractRSAPublicKey(signatureHandle->key_handle,
-                    &rsaPubKey);
+            res = SecKey_ExtractRSAPublicKey(signatureHandle->key_handle, &rsaPubKey);
             if (res != SEC_RESULT_SUCCESS)
             {
                 SEC_LOG_ERROR("SecKey_ExtractRSAPublicKey failed");
@@ -2496,8 +2494,23 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
                 return SEC_RESULT_FAILURE;
             }
 
-            openssl_res = RSA_verify(openssl_digest, digest, digest_len,
-                    signature, *signatureSize, rsa);
+            if (signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+                || signatureHandle->algorithm == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST) {
+                //pss padding
+                if (RSA_public_decrypt(RSA_size(rsa), signature, decrypted, rsa, RSA_NO_PADDING) == -1)
+                {
+                    SEC_RSA_FREE(rsa);
+                    SEC_LOG_ERROR("RSA_public_decrypt failed with error %s\n", ERR_error_string(ERR_get_error(), NULL));
+                    return SEC_RESULT_FAILURE;
+                }
+
+                /* verify the data */
+                openssl_res = RSA_verify_PKCS1_PSS(rsa, digest, (openssl_digest == NID_sha1) ? EVP_sha1() : EVP_sha256(), decrypted, -2 /* salt length recovered from signature*/);
+            } else {
+                openssl_res = RSA_verify(openssl_digest, digest, digest_len, signature, *signatureSize, rsa);
+            }
 
             SEC_RSA_FREE(rsa);
 
@@ -2621,8 +2634,8 @@ Sec_Result SecMac_GetInstance(Sec_ProcessorHandle* secProcHandle,
 
     case SEC_MACALGORITHM_CMAC_AES_128:
         Comcast_CMAC_CTX_init(&((*macHandle)->cmac_ctx));
-            if (1 != Comcast_CMAC_Init(&((*macHandle)->cmac_ctx), symetric_key,
-                        SecKey_GetKeyLen(key), SecKey_GetKeyLen(key) == 16 ? EVP_aes_128_ecb() : EVP_aes_256_ecb(), NULL))
+        if (1 != Comcast_CMAC_Init(&((*macHandle)->cmac_ctx), symetric_key,
+                    SecKey_GetKeyLen(key), SecKey_GetKeyLen(key) == 16 ? EVP_aes_128_ecb() : EVP_aes_256_ecb(), NULL))
         {
             SEC_LOG_ERROR("CMAC_Init failed");
             goto done;
@@ -3509,8 +3522,7 @@ Sec_Result SecKey_Derive_HKDF(Sec_ProcessorHandle* secProcHandle,
     SEC_BYTE loop;
     SEC_OBJECTID temp_key_id = SEC_OBJECTID_INVALID;
 
-    if (!SecKey_IsSymetric(type_derived))
-    {
+    if (!SecKey_IsSymetric(type_derived)) {
         SEC_LOG_ERROR("Only symetric keys can be derived");
         return SEC_RESULT_INVALID_PARAMETERS;
     }
@@ -3870,6 +3882,89 @@ Sec_Result SecKey_Derive_KeyLadderAes128(Sec_ProcessorHandle* secProcHandle,
 
     SEC_LOG_ERROR("Unimplemented root key type %d", root);
     return SEC_RESULT_FAILURE;
+}
+
+static void incCounter(SEC_BYTE *counter, SEC_SIZE counterSize) {
+    int idx = counterSize-1;
+    SEC_BOOL carry = 1;
+
+    while (carry > 0 && idx >= 0) {
+        if (counter[idx--]++ == 0x00) {
+            carry = 1;
+        } else {
+            carry = 0;
+        }
+    }
+}
+
+Sec_Result SecKey_Derive_CMAC_AES128(
+    Sec_ProcessorHandle* secProcHandle,
+    SEC_OBJECTID idDerived,
+    Sec_KeyType typeDerived,
+    Sec_StorageLoc locDerived,
+    SEC_OBJECTID derivationKey,
+    SEC_BYTE *otherData,
+    SEC_SIZE otherDataSize,
+    SEC_BYTE *counter,
+    SEC_SIZE counterSize)
+{
+    int i;
+    SEC_BYTE hash[SEC_DIGEST_MAX_LEN];
+    SEC_SIZE key_length;
+    SEC_SIZE mac_length = 16;
+    int r;
+    Sec_KeyHandle *base_key = NULL;
+    Sec_MacHandle *macHandle = NULL;
+    SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    if (!SecKey_IsSymetric(typeDerived)) {
+        SEC_LOG_ERROR("Can only derive symetric keys");
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
+
+    key_length = SecKey_GetKeyLenForKeyType(typeDerived);
+
+    if ((key_length % mac_length) != 0) {
+        SEC_LOG_ERROR("Key length %d has to be a multiple of 16.", key_length);
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
+    r = key_length / mac_length;
+
+    CHECK_EXACT(SecKey_GetInstance(secProcHandle, derivationKey, &base_key), SEC_RESULT_SUCCESS, done);
+
+    for (i = 1; i <= r; ++i) {
+        CHECK_EXACT(SecMac_GetInstance(secProcHandle, SEC_MACALGORITHM_CMAC_AES_128, base_key, &macHandle), SEC_RESULT_SUCCESS, done);
+        CHECK_EXACT(SecMac_Update(macHandle, counter, counterSize), SEC_RESULT_SUCCESS, done);
+        CHECK_EXACT(SecMac_Update(macHandle, otherData, otherDataSize), SEC_RESULT_SUCCESS, done);
+        incCounter(counter, counterSize);
+
+        if (SEC_RESULT_SUCCESS != SecMac_Release(macHandle, hash, &mac_length)) {
+            SEC_LOG_ERROR("SecMac_Release failed");
+            macHandle = NULL;
+            goto done;
+        }
+        macHandle = NULL;
+
+        memcpy(out_key + mac_length * (i - 1), hash, mac_length);
+    }
+
+    /* store key */
+    CHECK_EXACT(
+            SecKey_Provision(secProcHandle, idDerived, locDerived, SecKey_GetClearContainer(typeDerived), out_key, key_length),
+            SEC_RESULT_SUCCESS, done);
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    Sec_Memset(out_key, 0, sizeof(out_key));
+    if (base_key != NULL)
+        SecKey_Release(base_key);
+
+    if (macHandle != NULL)
+        SecMac_Release(macHandle, hash, &mac_length);
+
+    return res;
 }
 
 Sec_KeyType SecKey_GetKeyType(Sec_KeyHandle* keyHandle)
