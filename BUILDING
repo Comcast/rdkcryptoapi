@@ -5,6 +5,6 @@ Then ./configure
 # ./confgure
 
 Now you can run make
-# ./make
+# make
 
 

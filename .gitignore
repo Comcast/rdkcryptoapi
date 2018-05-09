@@ -1,0 +1,4 @@
+src/*.o
+src/.deps
+config
+autom4te.cache
