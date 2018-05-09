@@ -123,6 +123,16 @@ SEC_SIZE SecProcessor_GetKeyLadderMaxDepth(Sec_ProcessorHandle* handle, Sec_KeyL
 Sec_Result SecProcessor_PrintInfo(Sec_ProcessorHandle* secProcHandle);
 
 /**
+ * @brief Get the Security Processor information (SecAPI version and build
+ * information).
+ *
+ * @param secProcHandle secure processor handle
+ * @param pointer to secure processor information
+ */
+Sec_Result SecProcessor_GetInfo(Sec_ProcessorHandle* secProcHandle,
+        Sec_ProcessorInfo * secProcInfo);
+
+/**
  * @brief Obtain the device id
  *
  * @param secProcHandle secure processor handle
@@ -207,6 +217,24 @@ Sec_Result SecCipher_ProcessFragmented(Sec_CipherHandle* cipherHandle, SEC_BYTE*
         SEC_SIZE inputSize, SEC_BOOL lastInput, SEC_BYTE* output, SEC_SIZE outputSize,
         SEC_SIZE *bytesWritten, SEC_SIZE fragmentOffset, SEC_SIZE fragmentSize, SEC_SIZE fragmentPeriod);
 
+/**
+ * @brief Process the opaque buffers that were obtained with Sec_OpaqueBufferMalloc
+ *
+ * @param cipherHandle cipher handle
+ * @param inputHandle opaque buffer containing input
+ * @param outputHandle opaque buffer for writing output
+ * @param lastInput boolean value specifying whether this is the last chunk
+ * of input that will be processed.
+ * @param bytesWritten pointer to a value that will be set to number
+ * of bytes written to the output buffer
+ */
+Sec_Result SecCipher_ProcessOpaque(Sec_CipherHandle* cipherHandle,
+        void* inputHandle, void* outputHandle, SEC_BOOL lastInput,
+        SEC_SIZE *bytesWritten);
+
+Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, void* inputHandle, void* outputHandle, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
+
+Sec_Result SecCipher_KeyCheckOpaque(Sec_CipherHandle* cipherHandle, void* inputHandle, SEC_BYTE* expected);
 /**
  * @brief Release the cipher object
  *
@@ -514,6 +542,14 @@ Sec_Result SecCertificate_Release(Sec_CertificateHandle* certHandle);
 SEC_SIZE SecCertificate_List(Sec_ProcessorHandle *proc, SEC_OBJECTID *items, SEC_SIZE maxNumItems);
 
 /**
+ * @brief Get the properties for the key handle.
+ *
+ * @param keyHandle pointer to Sec_KeyHandle
+ * @param keyProps pointer to Sec_KeyProperties where information is stored.
+ */
+Sec_Result SecKey_GetKeyProperties(Sec_KeyHandle *keyHandle, Sec_KeyProperties *keyProps);
+
+/**
  * @brief Get the length of the specified key in bytes
  *
  * In case of symetric keys, the length returned is the actual size of the key data.
@@ -777,6 +813,7 @@ Sec_ProcessorHandle* SecKey_GetProcessor(Sec_KeyHandle* key);
 Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
         Sec_ECCRawPublicKey* otherPublicKey, Sec_KeyType type_derived,
         SEC_OBJECTID id_derived, Sec_StorageLoc loc_derived,
+        Sec_Kdf kdf,
         Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *otherInfo,
         SEC_SIZE otherInfoSize);
 
@@ -850,6 +887,39 @@ SEC_BYTE* Sec_NativeMalloc(Sec_ProcessorHandle* handle, SEC_SIZE length);
  */
 void Sec_NativeFree(Sec_ProcessorHandle* handle, void *ptr);
 
+Sec_Result SecCipher_ProcessCtrWithDataShift(Sec_CipherHandle* cipherHandle, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
+
+Sec_Result SecKey_ExportKey(Sec_KeyHandle* keyHandle, SEC_BYTE* derivationInput, SEC_BYTE* exportedKey, SEC_SIZE keyBufferLen, SEC_SIZE *keyBytesWritten);
+
+Sec_Result SecKey_GetProperties(Sec_KeyHandle* keyHandle,Sec_KeyProperties* keyProperties);
+
+/**
+ * @brief Checks secure boot configuration to verify that Secure Boot is enabled.
+ */
+Sec_Result SecCodeIntegrity_SecureBootEnabled(void);
+
+Sec_Result SecSVP_SetTime(time_t time);
+
+Sec_Result Sec_OpaqueBufferMalloc(SEC_SIZE bufLength, void **handle, void *params);
+
+Sec_Result Sec_OpaqueBufferWrite(void *handle, SEC_SIZE offset, void *data, SEC_SIZE length);
+
+Sec_Result Sec_OpaqueBufferFree(void *handle, void *params);
+
+Sec_Result SecKeyExchange_GetInstance(Sec_ProcessorHandle* secProcHandle, Sec_KeyExchangeAlgorithm exchangeType, void* exchangeParameters, Sec_KeyExchangeHandle** keyExchangeHandle);
+
+Sec_Result SecKeyExchange_GenerateKeys(Sec_KeyExchangeHandle* keyExchangeHandle, SEC_BYTE* publicKey, SEC_SIZE pubKeySize);
+
+Sec_Result SecKeyExchange_ComputeSecret(Sec_KeyExchangeHandle* keyExchangeHandle, SEC_BYTE* otherPublicKey, SEC_SIZE otherPublicKeySize, Sec_KeyType typeComputed, SEC_OBJECTID idComputed, Sec_StorageLoc locComputed);
+
+Sec_Result SecKeyExchange_Release(Sec_KeyExchangeHandle* keyExchangeHandle);
+
+Sec_Result SecKey_Derive_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_StorageLoc loc, SEC_BYTE *nonce);
+
+Sec_Result SecKey_Derive_HKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_MacAlgorithm macAlgorithm, SEC_BYTE *nonce, SEC_BYTE *salt, SEC_SIZE saltSize, SEC_BYTE *info, SEC_SIZE infoSize, SEC_OBJECTID baseKeyId);
+
+Sec_Result SecKey_Derive_ConcatKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *nonce, SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize, SEC_OBJECTID baseKeyId);
+    
 #ifdef __cplusplus
 }
 #endif

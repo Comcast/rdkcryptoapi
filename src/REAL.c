@@ -27,7 +27,15 @@ static volatile double real_zero GCC_NOTUSED = 0.0;
 #define    INFINITY    (1.0/real_zero)
 #endif
 
-int finite(double d);
+/*
+ * the finite function is unavailable in iOS libraries for math.h, so if our target is IOS, 
+ * then override the function finite(d) with the c99 isfinite(d)
+ */
+#if defined(SEC_TARGET_IOS)
+#define finite(d) isfinite(d)
+#else
+    int finite(double d);
+#endif
 
 /*
  * REAL basic type description.

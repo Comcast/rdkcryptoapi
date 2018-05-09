@@ -28,8 +28,7 @@
 #include <openssl/ec.h>
 #include <openssl/ecdh.h>
 #include <openssl/ecdsa.h>
-#include "sec_cmac.h"
-
+#include <openssl/cmac.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -38,7 +37,17 @@ extern "C"
 
 #define SEC_OPENSSL_KEYCONTAINER_DERIVED SEC_KEYCONTAINER_SOC_INTERNAL_0
 
+#define SEC_OPENSSL_KEYCONTAINER_WITH_PROPS SEC_KEYCONTAINER_SOC_INTERNAL_1
+
 #define SEC_OBJECTID_OPENSSL_DERIVE_TMP SEC_OBJECTID_RESERVEDPLATFORM_0
+
+#define SEC_OBJECTID_OPENSSL_EXPORT SEC_OBJECTID_RESERVEDPLATFORM_1
+
+typedef struct {
+    SEC_BYTE c1[SEC_AES_BLOCK_SIZE];
+    SEC_BYTE derivation_input[SEC_AES_BLOCK_SIZE];
+    SEC_BYTE iv[SEC_AES_BLOCK_SIZE];
+} _Sec_ExportedHeader;
 
 typedef struct
 {
@@ -103,35 +112,20 @@ struct Sec_KeyHandle_struct
     struct Sec_ProcessorHandle_struct *proc;
 };
 
-typedef struct
-{
-    AES_KEY aes_key;
-    SEC_BYTE ivec[SEC_AES_BLOCK_SIZE];
-    SEC_BYTE ecount[SEC_AES_BLOCK_SIZE];
-    SEC_SIZE num;
-} _Sec_CtrCtx;
-
 struct Sec_CipherHandle_struct
 {
     Sec_CipherAlgorithm algorithm;
     Sec_CipherMode mode;
     Sec_KeyHandle* key_handle;
     SEC_BOOL last;
-    union
-    {
-        EVP_CIPHER_CTX evp_ctx;
-        _Sec_CtrCtx ctr_ctx;
-    };
+    EVP_CIPHER_CTX *evp_ctx;
 };
 
 struct Sec_DigestHandle_struct
 {
     Sec_DigestAlgorithm algorithm;
-    union
-    {
-        SHA_CTX sha1_ctx;
-        SHA256_CTX sha256_ctx;
-    };
+    SHA_CTX sha1_ctx;
+    SHA256_CTX sha256_ctx;
 };
 
 struct Sec_SignatureHandle_struct
@@ -145,11 +139,11 @@ struct Sec_MacHandle_struct
 {
     Sec_MacAlgorithm algorithm;
     Sec_KeyHandle* key_handle;
-    union
-    {
-        HMAC_CTX hmac_ctx;
-        Comcast_CMAC_CTX cmac_ctx;
-    };
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    HMAC_CTX _hmac_ctx;
+#endif
+    HMAC_CTX *hmac_ctx;
+    CMAC_CTX *cmac_ctx;
 };
 
 struct Sec_CertificateHandle_struct
@@ -203,15 +197,16 @@ struct Sec_ProcessorHandle_struct
     char keystorage_file_dir[SEC_MAX_FILE_PATH_LEN];
     char certstorage_file_dir[SEC_MAX_FILE_PATH_LEN];
     char bundlestorage_file_dir[SEC_MAX_FILE_PATH_LEN];
+    int device_settings_init_flag;
 };
 
-typedef Sec_Result (*SecOpenSSL_CustomProcessKeyContainer)(Sec_ProcessorHandle *proc,
-    _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
-    SEC_SIZE data_len, SEC_OBJECTID objectId);
-void SecOpenssl_RegisterCustomProcessKeyContainer(SecOpenSSL_CustomProcessKeyContainer func);
-Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
-    _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
-    SEC_SIZE data_len, SEC_OBJECTID objectId);
+struct Sec_KeyExchangeHandle_struct
+{
+    Sec_ProcessorHandle *proc;
+    Sec_KeyExchangeAlgorithm alg;
+    DH *dh;
+    EC_KEY *ecdh_priv;
+};
 
 #ifdef __cplusplus
 }

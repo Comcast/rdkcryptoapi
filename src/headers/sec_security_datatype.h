@@ -21,6 +21,7 @@
 #include <sys/param.h>
 
 #ifdef __cplusplus
+
 extern "C"
 {
 #endif
@@ -161,6 +162,7 @@ extern "C"
 #define SEC_ASN1KC_WRAPPINGIV "WrappingIV"
 #define SEC_ASN1KC_WRAPPINGALGORITHMID "WrappingAlgorithmId"
 #define SEC_ASN1KC_WRAPPEDKEYOFFSET "WrappedKeyOffset"
+#define SEC_ASN1KC_WRAPPINGKEY "WrappingKey"
 
 /*****************************************************************************
  * EXPORTED TYPES
@@ -216,6 +218,8 @@ typedef enum
     SEC_KEYTYPE_HMAC_256,
     SEC_KEYTYPE_ECC_NISTP256,
     SEC_KEYTYPE_ECC_NISTP256_PUBLIC,
+    SEC_KEYTYPE_RSA_3072,
+    SEC_KEYTYPE_RSA_3072_PUBLIC,
     SEC_KEYTYPE_NUM
 } Sec_KeyType;
 
@@ -260,6 +264,14 @@ typedef enum
     SEC_KEYCONTAINER_RAW_ECC_NISTP256_PUBLIC,   // Clear public ECC key, NIST P256 curve, in Sec_ECCRawPublicKey format
     SEC_KEYCONTAINER_DER_ECC_NISTP256,
     SEC_KEYCONTAINER_DER_ECC_NISTP256_PUBLIC,
+    SEC_KEYCONTAINER_JTYPE,
+    SEC_KEYCONTAINER_EXPORTED,
+    SEC_KEYCONTAINER_RAW_RSA_3072,
+    SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC,
+    SEC_KEYCONTAINER_PEM_RSA_3072,
+    SEC_KEYCONTAINER_PEM_RSA_3072_PUBLIC,
+    SEC_KEYCONTAINER_DER_RSA_3072,
+    SEC_KEYCONTAINER_DER_RSA_3072_PUBLIC,
     SEC_KEYCONTAINER_NUM
 } Sec_KeyContainer;
 
@@ -384,8 +396,54 @@ typedef enum
     SEC_RESULT_ITEM_ALREADY_PROVISIONED,
     SEC_RESULT_ITEM_NON_REMOVABLE,
     SEC_RESULT_VERIFICATION_FAILED,
+    SEC_RESULT_NO_KEYSLOTS_AVAILABLE,
+    SEC_RESULT_SVP_NOT_ENGAGED,
+    SEC_RESULT_OPL_NOT_ENGAGED,
+    SEC_RESULT_INVALID_SVP_DATA,
+    SEC_RESULT_ALLOCATION_FAILED,
     SEC_RESULT_NUM
 } Sec_Result;
+
+/**
+ * @brief Key output protection rights
+ */
+typedef enum
+{
+    SEC_KEYOUTPUTRIGHT_NOT_SET = 0x00,
+    SEC_KEYOUTPUTRIGHT_SVP_REQUIRED = 0x01,
+    SEC_KEYOUTPUTRIGHT_DIGITAL_OPL_DTCP_ALLOWED = 0x02,
+    SEC_KEYOUTPUTRIGHT_DIGITAL_OPL_HDCP_1_4_ALLOWED = 0x03,
+    SEC_KEYOUTPUTRIGHT_DIGITAL_OPL_HDCP_2_2_ALLOWED = 0x04,
+    SEC_KEYOUTPUTRIGHT_ANALOG_OUTPUT_ALLOWED = 0x05,
+    SEC_KEYOUTPUTRIGHT_TRANSCRIPTION_COPY_ALLOWED = 0x06,
+    SEC_KEYOUTPUTRIGHT_UNRESTRICTED_COPY_ALLOWED = 0x07,
+    SEC_KEYOUTPUTRIGHT_NUM
+} Sec_KeyOutputRight;
+
+/**
+ * @brief Key usage values
+ */
+typedef enum
+{
+    SEC_KEYUSAGE_DATA_KEY = 0,
+    SEC_KEYUSAGE_DATA,
+    SEC_KEYUSAGE_KEY,
+} Sec_KeyUsage;
+
+#define SEC_KEYRIGHTS_LEN 8
+
+typedef struct _Sec_KeyProperties
+{
+    char keyId[40];
+    SEC_BYTE rights[SEC_KEYRIGHTS_LEN];
+    char notBefore[24];
+    char notOnOrAfter[24];
+    SEC_SIZE keyLength;
+    Sec_KeyType keyType;
+    Sec_KeyUsage usage;
+    SEC_BYTE cacheable;
+    SEC_BYTE _pad[3]; /* FIXME is this needed ? */
+} Sec_KeyProperties;
 
 /**
  * @brief Raw Private RSA key data
@@ -441,7 +499,7 @@ typedef struct
  */
 typedef struct
 {
-    Sec_KeyType type;	     // curve parameters indicated by key type
+    Sec_KeyType type;        // curve parameters indicated by key type
     SEC_BYTE x[SEC_EC_KEY_MAX_LEN];
     SEC_BYTE y[SEC_EC_KEY_MAX_LEN];
     SEC_BYTE prv[SEC_EC_KEY_MAX_LEN];
@@ -454,7 +512,7 @@ typedef struct
  */
 typedef struct
 {
-    Sec_KeyType type;	     // curve parameters indicated by key type
+    Sec_KeyType type;        // curve parameters indicated by key type
     SEC_BYTE x[SEC_EC_KEY_MAX_LEN];
     SEC_BYTE y[SEC_EC_KEY_MAX_LEN];
     SEC_BYTE key_len[4];     // length in bytes of x (same as y and prv)
@@ -466,10 +524,41 @@ typedef struct
  * This contains just a 256-bit [32 byte] ECC private key.
  * $$$ If we add more ECC key types, will need to modify this.
  */
-typedef struct
-{
+typedef struct {
     SEC_BYTE prv[SEC_ECC_NISTP256_KEY_LEN];
 } Sec_ECCRawOnlyPrivateKey;
+
+typedef struct {
+    SEC_BYTE p[384];  // Prime p.  Big-endian format 
+    SEC_SIZE pLen;  // Length of p in bytes.  Max value is 384. 
+    SEC_BYTE g[384];  // Base g.  Big-endian format 
+    SEC_SIZE gLen;  // Length of g in bytes 
+} Sec_DHParameters;
+
+typedef enum {
+    NISTP256 = 0
+} EC_PARAMETERS;
+
+typedef struct {
+    EC_PARAMETERS curve;
+} Sec_ECDHParameters;
+
+typedef enum {
+    SEC_KEYEXCHANGE_DH = 0,
+    SEC_KEYEXCHANGE_ECDH,
+    SEC_KEYEXCHANGE_NUM
+} Sec_KeyExchangeAlgorithm;
+
+typedef enum {
+    SEC_KDF_HKDF = 0,
+    SEC_KDF_CONCAT,
+    SEC_KDF_ANSI_X_9_63,
+    SEC_KDF_NUM
+} Sec_Kdf;
+
+typedef struct {
+    SEC_BYTE version[256];
+} Sec_ProcessorInfo;
 
 /**
  * @brief Opaque processor initialization parameters
@@ -530,6 +619,12 @@ typedef struct Sec_RandomHandle_struct Sec_RandomHandle;
  *
  */
 typedef struct Sec_CertificateHandle_struct Sec_CertificateHandle;
+
+/**
+ * @brief Opaque key exchange handle
+ *
+ */
+typedef struct Sec_KeyExchangeHandle_struct Sec_KeyExchangeHandle;
 
 #ifdef __cplusplus
 }

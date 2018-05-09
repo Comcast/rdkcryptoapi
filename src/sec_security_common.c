@@ -22,6 +22,14 @@
 #include <string.h>
 #include <stdlib.h>
 
+#ifndef SEC_TRACE_UNWRAP
+#define SEC_TRACE_UNWRAP 0
+#endif
+
+#if SEC_TRACE_UNWRAP
+#pragma message "SEC_TRACE_UNWRAP is enabled.  Please disable in production builds."
+#endif
+
 int Sec_Memcmp(const void* ptr1, const void* ptr2, const size_t num)
 {
 	size_t i;
@@ -384,6 +392,14 @@ SEC_BOOL SecCipher_IsRsa(Sec_CipherAlgorithm alg)
 			|| alg == SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING;
 }
 
+SEC_BOOL SecSignature_IsRsaPss(Sec_SignatureAlgorithm alg)
+{
+	return alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+		|| alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+		|| alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST
+		|| alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST;
+}
+
 SEC_BOOL SecCipher_IsEcc(Sec_CipherAlgorithm alg)
 {
 	return alg == SEC_CIPHERALGORITHM_ECC_ELGAMAL;
@@ -478,14 +494,15 @@ Sec_Result SecSignature_IsValidKey(Sec_KeyType key_type,
 	case SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST:
 	case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS:
 	case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST:
 		if (mode == SEC_SIGNATUREMODE_SIGN)
 		{
 			if (key_type == SEC_KEYTYPE_RSA_1024
-					|| key_type == SEC_KEYTYPE_RSA_2048)
+					|| key_type == SEC_KEYTYPE_RSA_2048
+					|| key_type == SEC_KEYTYPE_RSA_3072)
 				return SEC_RESULT_SUCCESS;
 			else
 				return SEC_RESULT_FAILURE;
@@ -494,8 +511,10 @@ Sec_Result SecSignature_IsValidKey(Sec_KeyType key_type,
 		{
 			if (key_type == SEC_KEYTYPE_RSA_1024
 					|| key_type == SEC_KEYTYPE_RSA_2048
+					|| key_type == SEC_KEYTYPE_RSA_3072
 					|| key_type == SEC_KEYTYPE_RSA_1024_PUBLIC
-					|| key_type == SEC_KEYTYPE_RSA_2048_PUBLIC)
+					|| key_type == SEC_KEYTYPE_RSA_2048_PUBLIC
+					|| key_type == SEC_KEYTYPE_RSA_3072_PUBLIC)
 				return SEC_RESULT_SUCCESS;
 			else
 				return SEC_RESULT_FAILURE;
@@ -560,6 +579,58 @@ done:
 	return res;
 }
 
+Sec_KeyType SecKey_GetRSAKeyTypeForBitLength(int numBits) {
+	switch (numBits) {
+		case 1024:
+			return SEC_KEYTYPE_RSA_1024;
+		case 2048:
+			return SEC_KEYTYPE_RSA_2048;
+		case 3072:
+			return SEC_KEYTYPE_RSA_3072;
+		default:
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyType SecKey_GetRSAPubKeyTypeForBitLength(int numBits) {
+	switch (numBits) {
+		case 1024:
+			return SEC_KEYTYPE_RSA_1024_PUBLIC;
+		case 2048:
+			return SEC_KEYTYPE_RSA_2048_PUBLIC;
+		case 3072:
+			return SEC_KEYTYPE_RSA_3072_PUBLIC;
+		default:
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyType SecKey_GetRSAKeyTypeForByteLength(int numBytes) {
+	switch (numBytes) {
+		case 128:
+			return SEC_KEYTYPE_RSA_1024;
+		case 256:
+			return SEC_KEYTYPE_RSA_2048;
+		case 384:
+			return SEC_KEYTYPE_RSA_3072;
+		default:
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyType SecKey_GetRSAPubKeyTypeForByteLength(int numBytes) {
+	switch (numBytes) {
+		case 128:
+			return SEC_KEYTYPE_RSA_1024_PUBLIC;
+		case 256:
+			return SEC_KEYTYPE_RSA_2048_PUBLIC;
+		case 384:
+			return SEC_KEYTYPE_RSA_3072_PUBLIC;
+		default:
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
 // Like SecSignature_SingleInput but with a Cert handle
 // Used to validate a signature using the RSA or ECC public key from a specified certificate.
 Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
@@ -580,7 +651,9 @@ Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
 	Sec_KeyType keyType = SecCertificate_GetKeyType(certHandle);
 
 	switch (keyType) {
+	case SEC_KEYTYPE_RSA_1024_PUBLIC:
 	case SEC_KEYTYPE_RSA_2048_PUBLIC:
+	case SEC_KEYTYPE_RSA_3072_PUBLIC:
 	    if (SEC_RESULT_SUCCESS != SecCertificate_ExtractRSAPublicKey(certHandle, &rsaPubKey))
 	    {
 	        SEC_LOG_ERROR("SecCertificate_ExtractRSAPublicKey failed");
@@ -590,8 +663,8 @@ Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
 	    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle,
 	            SEC_OBJECTID_SIG_FROM_CERT,
 	            SEC_STORAGELOC_RAM_SOFT_WRAPPED,
-	            (Sec_BEBytesToUint32(rsaPubKey.modulus_len_be) == 1024) ? SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC : SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC,
-	                    (SEC_BYTE *) &rsaPubKey, sizeof(rsaPubKey)))
+	            SecKey_GetRSAPubKeyTypeForBitLength(Sec_BEBytesToUint32(rsaPubKey.modulus_len_be)),
+                (SEC_BYTE *) &rsaPubKey, sizeof(rsaPubKey)))
 	    {
 	        SEC_LOG_ERROR("SecKey_Provision failed");
 	        goto done;
@@ -846,6 +919,9 @@ SEC_SIZE SecKey_GetKeyLenForKeyType(Sec_KeyType keyType)
 	case SEC_KEYTYPE_RSA_2048:
 	case SEC_KEYTYPE_RSA_2048_PUBLIC:
 		return 256;
+	case SEC_KEYTYPE_RSA_3072:
+	case SEC_KEYTYPE_RSA_3072_PUBLIC:
+		return 384;
 	case SEC_KEYTYPE_ECC_NISTP256:
 	case SEC_KEYTYPE_ECC_NISTP256_PUBLIC:
 		return SEC_ECC_NISTP256_KEY_LEN;
@@ -855,6 +931,7 @@ SEC_SIZE SecKey_GetKeyLenForKeyType(Sec_KeyType keyType)
 		break;
 	}
 
+	SEC_LOG_ERROR("Unknown key type encountered: %d", keyType);
 	return 0;
 }
 
@@ -899,6 +976,8 @@ SEC_BOOL SecKey_IsRsa(Sec_KeyType type)
 	case SEC_KEYTYPE_RSA_1024_PUBLIC:
 	case SEC_KEYTYPE_RSA_2048:
 	case SEC_KEYTYPE_RSA_2048_PUBLIC:
+	case SEC_KEYTYPE_RSA_3072:
+	case SEC_KEYTYPE_RSA_3072_PUBLIC:
 		return 1;
 
 	default:
@@ -914,6 +993,7 @@ SEC_BOOL SecKey_IsPubRsa(Sec_KeyType type)
 	{
 	case SEC_KEYTYPE_RSA_1024_PUBLIC:
 	case SEC_KEYTYPE_RSA_2048_PUBLIC:
+	case SEC_KEYTYPE_RSA_3072_PUBLIC:
 		return 1;
 
 	default:
@@ -929,6 +1009,7 @@ SEC_BOOL SecKey_IsPrivRsa(Sec_KeyType type)
 	{
 	case SEC_KEYTYPE_RSA_1024:
 	case SEC_KEYTYPE_RSA_2048:
+	case SEC_KEYTYPE_RSA_3072:
 		return 1;
 
 	default:
@@ -1123,12 +1204,16 @@ SEC_BOOL SecKey_IsClearKeyContainer(Sec_KeyContainer kct)
 	case SEC_KEYCONTAINER_RAW_HMAC_256:
 	case SEC_KEYCONTAINER_RAW_RSA_1024:
 	case SEC_KEYCONTAINER_RAW_RSA_2048:
+	case SEC_KEYCONTAINER_RAW_RSA_3072:
 	case SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC:
 	case SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC:
+	case SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC:
 	case SEC_KEYCONTAINER_PEM_RSA_1024:
 	case SEC_KEYCONTAINER_PEM_RSA_2048:
+	case SEC_KEYCONTAINER_PEM_RSA_3072:
 	case SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC:
 	case SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC:
+	case SEC_KEYCONTAINER_PEM_RSA_3072_PUBLIC:
 	case SEC_KEYCONTAINER_RAW_ECC_NISTP256:
 	case SEC_KEYCONTAINER_RAW_ECC_NISTP256_PUBLIC:
 		return SEC_TRUE;
@@ -1159,10 +1244,14 @@ Sec_KeyContainer SecKey_GetClearContainer(Sec_KeyType key_type)
 		return SEC_KEYCONTAINER_RAW_RSA_1024;
 	case SEC_KEYTYPE_RSA_2048:
 		return SEC_KEYCONTAINER_RAW_RSA_2048;
+	case SEC_KEYTYPE_RSA_3072:
+		return SEC_KEYCONTAINER_RAW_RSA_3072;
 	case SEC_KEYTYPE_RSA_1024_PUBLIC:
 		return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
 	case SEC_KEYTYPE_RSA_2048_PUBLIC:
 		return SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC;
+	case SEC_KEYTYPE_RSA_3072_PUBLIC:
+		return SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC;
 	case SEC_KEYTYPE_ECC_NISTP256:
 		return SEC_KEYCONTAINER_RAW_ECC_NISTP256;
 	case SEC_KEYTYPE_ECC_NISTP256_PUBLIC:
@@ -1173,6 +1262,71 @@ Sec_KeyContainer SecKey_GetClearContainer(Sec_KeyType key_type)
 
 	return SEC_KEYCONTAINER_NUM;
 }
+
+Sec_KeyType SecKey_GetKeyTypeForClearKeyContainer(Sec_KeyContainer kc)
+{
+	switch (kc) {
+	case SEC_KEYCONTAINER_RAW_AES_128:
+		return SEC_KEYTYPE_AES_128;
+
+    case SEC_KEYCONTAINER_RAW_AES_256:
+		return SEC_KEYTYPE_AES_256;
+
+    case SEC_KEYCONTAINER_RAW_HMAC_128:
+		return SEC_KEYTYPE_HMAC_128;
+
+    case SEC_KEYCONTAINER_RAW_HMAC_160:
+		return SEC_KEYTYPE_HMAC_160;
+
+    case SEC_KEYCONTAINER_RAW_HMAC_256:
+		return SEC_KEYTYPE_HMAC_256;
+
+    case SEC_KEYCONTAINER_RAW_RSA_1024:
+    case SEC_KEYCONTAINER_PEM_RSA_1024:
+    case SEC_KEYCONTAINER_DER_RSA_1024:
+		return SEC_KEYTYPE_RSA_1024;
+
+    case SEC_KEYCONTAINER_RAW_RSA_2048:
+    case SEC_KEYCONTAINER_PEM_RSA_2048:
+    case SEC_KEYCONTAINER_DER_RSA_2048:
+		return SEC_KEYTYPE_RSA_2048;
+
+    case SEC_KEYCONTAINER_RAW_RSA_3072:
+    case SEC_KEYCONTAINER_PEM_RSA_3072:
+    case SEC_KEYCONTAINER_DER_RSA_3072:
+		return SEC_KEYTYPE_RSA_3072;
+
+    case SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC:
+    case SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC:
+    case SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC:
+		return SEC_KEYTYPE_RSA_1024_PUBLIC;
+
+    case SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC:
+    case SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC:
+    case SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC:
+		return SEC_KEYTYPE_RSA_2048_PUBLIC;
+
+    case SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC:
+    case SEC_KEYCONTAINER_PEM_RSA_3072_PUBLIC:
+    case SEC_KEYCONTAINER_DER_RSA_3072_PUBLIC:
+		return SEC_KEYTYPE_RSA_3072_PUBLIC;
+
+    case SEC_KEYCONTAINER_PEM_ECC_NISTP256:
+    case SEC_KEYCONTAINER_RAW_ECC_PRIVONLY_NISTP256:
+    case SEC_KEYCONTAINER_RAW_ECC_NISTP256:
+    case SEC_KEYCONTAINER_DER_ECC_NISTP256:
+    	return SEC_KEYTYPE_ECC_NISTP256;
+
+    case SEC_KEYCONTAINER_PEM_ECC_NISTP256_PUBLIC:
+    case SEC_KEYCONTAINER_RAW_ECC_NISTP256_PUBLIC:
+    case SEC_KEYCONTAINER_DER_ECC_NISTP256_PUBLIC:
+    	return SEC_KEYTYPE_ECC_NISTP256_PUBLIC;
+
+    default:
+    	return SEC_KEYTYPE_NUM;
+	}
+}
+
 
 SEC_BOOL SecCertificate_IsProvisioned(Sec_ProcessorHandle* secProcHandle,
 		SEC_OBJECTID object_id)
@@ -1556,6 +1710,75 @@ done:
     return res;
 }
 
+Sec_Result SecKey_GenerateWrappedKeyAsn1V3(SEC_BYTE *payload, SEC_SIZE payloadLen, Sec_KeyType wrappedKeyType,
+                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, 
+                                         SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
+                                         SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset)
+{
+    Sec_Asn1KC *asn1kc = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    asn1kc = SecAsn1KC_Alloc();
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrBuffer(asn1kc, SEC_ASN1KC_WRAPPEDKEY, payload, payloadLen))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrBuffer failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUlong(asn1kc, SEC_ASN1KC_WRAPPEDKEYTYPEID, wrappedKeyType))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUlong failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrBuffer(asn1kc, SEC_ASN1KC_WRAPPINGKEY, wrappingKey, wrappingKeyLen))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrBuffer failed");
+        goto done;
+    }
+
+    if (wrappingIv != NULL && SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrBuffer(asn1kc, SEC_ASN1KC_WRAPPINGIV, wrappingIv, SEC_AES_BLOCK_SIZE))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrBuffer failed");
+        goto done;
+    }
+
+    if ((key_offset + SecKey_GetKeyLenForKeyType(wrappedKeyType)) > payloadLen)
+    {
+        SEC_LOG_ERROR("Illegal key_offset %ld", (long)key_offset);
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUlong(asn1kc, SEC_ASN1KC_WRAPPEDKEYOFFSET, key_offset))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUlong failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttrUlong(asn1kc, SEC_ASN1KC_WRAPPINGALGORITHMID, wrappingAlgorithm))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_AddAttrUlong failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_Encode(asn1kc, output, output_len, written))
+    {
+        SEC_LOG_ERROR("SecAsn1KC_Encode failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (asn1kc != NULL)
+    {
+        SecAsn1KC_Free(asn1kc);
+        asn1kc = NULL;
+    }
+
+    return res;
+}
+
 Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
                                               SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
                                               Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv,
@@ -1571,17 +1794,20 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPEDKEY, payload, payloadLen, written))
     {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPEDKEY failed");
         return SEC_RESULT_FAILURE;
     }
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPEDKEYTYPEID, &ulongVal))
     {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrUlong SEC_ASN1KC_WRAPPEDKEYTYPEID failed");
         return SEC_RESULT_FAILURE;
     }
     *wrappedKeyType = (Sec_KeyType) ulongVal;
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUint64(kc, SEC_ASN1KC_WRAPPINGKEYID, wrappingId))
     {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrUint64 SEC_ASN1KC_WRAPPINGKEYID failed");
         return SEC_RESULT_FAILURE;
     }
 
@@ -1589,6 +1815,7 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
     {
         if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPEDKEYOFFSET, &ulongVal))
         {
+	        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrUlong SEC_ASN1KC_WRAPPEDKEYOFFSET failed");
             return SEC_RESULT_FAILURE;
         }
         *key_offset = (SEC_SIZE) ulongVal;
@@ -1600,11 +1827,13 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
 
     if (SecAsn1KC_HasAttr(kc, SEC_ASN1KC_WRAPPINGIV) && SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPINGIV, wrappingIv, SEC_AES_BLOCK_SIZE, &writtenIv))
     {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPINGIV failed");
         return SEC_RESULT_FAILURE;
     }
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPINGALGORITHMID, &ulongVal))
     {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrUlong SEC_ASN1KC_WRAPPINGALGORITHMID failed");
         return SEC_RESULT_FAILURE;
     }
     *wrappingAlg = (Sec_CipherAlgorithm) ulongVal;
@@ -1640,5 +1869,107 @@ done:
     return res;
 }
 
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1V3(Sec_Asn1KC *kc,
+                                              SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                              Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv,
+                                              Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset,
+                                              SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, SEC_SIZE *writtenWrappingKey)
+{
+    unsigned long ulongVal;
+    SEC_SIZE writtenIv;
+
+	*writtenWrappingKey = 0;
+	*wrappingId = 0;
+
+    if (kc == NULL)
+    {
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPEDKEY, payload, payloadLen, written))
+    {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPEDKEY failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPEDKEYTYPEID, &ulongVal))
+    {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPEDKEYTYPEID failed");
+        return SEC_RESULT_FAILURE;
+    }
+    *wrappedKeyType = (Sec_KeyType) ulongVal;
+
+    if (SecAsn1KC_HasAttr(kc, SEC_ASN1KC_WRAPPEDKEYOFFSET))
+    {
+        if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPEDKEYOFFSET, &ulongVal))
+        {
+	        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPEDKEYOFFSET failed");
+            return SEC_RESULT_FAILURE;
+        }
+        *key_offset = (SEC_SIZE) ulongVal;
+    }
+    else
+    {
+        *key_offset = (SEC_SIZE) 0; // default value
+    }
+
+    if (SecAsn1KC_HasAttr(kc, SEC_ASN1KC_WRAPPINGIV) && SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPINGIV, wrappingIv, SEC_AES_BLOCK_SIZE, &writtenIv))
+    {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPEDKEYOFFSET failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUlong(kc, SEC_ASN1KC_WRAPPINGALGORITHMID, &ulongVal))
+    {
+        SEC_TRACE(SEC_TRACE_UNWRAP, "SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPINGALGORITHMID failed");
+        return SEC_RESULT_FAILURE;
+    }
+    *wrappingAlg = (Sec_CipherAlgorithm) ulongVal;
+
+    if (SecAsn1KC_HasAttr(kc, SEC_ASN1KC_WRAPPINGKEY))
+    {
+        if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrBuffer(kc, SEC_ASN1KC_WRAPPINGKEY, wrappingKey, wrappingKeyLen, writtenWrappingKey)) {
+        	SEC_LOG_ERROR("SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPINGKEY failed");
+            return SEC_RESULT_FAILURE;
+        }
+    } else {
+    	if (SEC_RESULT_SUCCESS != SecAsn1KC_GetAttrUint64(kc, SEC_ASN1KC_WRAPPINGKEYID, wrappingId)) {
+        	SEC_LOG_ERROR("SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPINGKEYID failed");
+        	return SEC_RESULT_FAILURE;
+    	}
+    }    	
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferV3(SEC_BYTE *asn1, SEC_SIZE asn1_len,
+                                                    SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                                    Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset,
+                                                    SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeySize, SEC_SIZE *writtenWrappingKey)
+{
+    Sec_Asn1KC *asn1kc = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    asn1kc = SecAsn1KC_Decode(asn1, asn1_len);
+    if (asn1kc == NULL)
+    {
+        SEC_LOG_ERROR("SecAsn1KC_Decode failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_ExtractWrappedKeyParamsAsn1V3(asn1kc, payload, payloadLen, written,
+                                                                    wrappedKeyType, wrappingId, wrappingIv, wrappingAlg, key_offset,
+                                                                    wrappingKey, wrappingKeySize, writtenWrappingKey))
+    {
+        SEC_LOG_ERROR("SecKey_ExtractWrappedKeyParamsAsn1V3 failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SecAsn1KC_Free(asn1kc);
+    return res;
+}
 
 #endif

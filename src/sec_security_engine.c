@@ -202,6 +202,8 @@ cleanup:
     return ret;
 }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+
 static RSA_METHOD g_sec_openssl_rsamethod = {
         "securityapi RSA method",
         _Sec_OpenSSLPubEncrypt,  /* rsa_pub_enc */
@@ -219,6 +221,32 @@ static RSA_METHOD g_sec_openssl_rsamethod = {
         NULL,  /* rsa_keygen */
 };
 
+#else
+
+RSA_METHOD * _GetRSAMethod() {
+    static RSA_METHOD *s_method = NULL;
+
+    if (s_method == NULL) {
+        s_method = RSA_meth_new("securityapi RSA method", RSA_METHOD_FLAG_NO_CHECK | RSA_FLAG_EXT_PKEY);
+
+        //rsa_pub_enc
+        RSA_meth_set_pub_enc(s_method, _Sec_OpenSSLPubEncrypt);
+
+        //rsa_priv_dec
+        RSA_meth_set_priv_dec(s_method, _Sec_OpenSSLPrivDecrypt);
+
+        //rsa_sign
+        RSA_meth_set_sign(s_method, _Sec_OpenSSLPrivSign);
+
+        //rsa_verify
+        RSA_meth_set_verify(s_method, _Sec_OpenSSLPubVerify);
+    }
+
+    return s_method;
+}
+
+#endif
+
 static void ENGINE_load_securityapi(void)
 {
     ENGINE *engine = ENGINE_new();
@@ -231,7 +259,10 @@ static void ENGINE_load_securityapi(void)
 
     if (!ENGINE_set_id(engine, "securityapi")
             || !ENGINE_set_name(engine, "SecurityApi engine")
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
             || !ENGINE_set_RSA(engine, &g_sec_openssl_rsamethod)
+#else
+#endif
             )
     {
         ENGINE_free(engine);
@@ -292,8 +323,15 @@ RSA* SecKey_ToEngineRSA(Sec_KeyHandle *key)
         return NULL;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     rsa->n = BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL);
     rsa->e = BN_bin2bn(pubKey.e, 4, NULL);
+#else
+    RSA_set0_key(rsa, 
+        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL), 
+        BN_bin2bn(pubKey.e, 4, NULL), 
+        NULL);
+#endif
 
     RSA_set_app_data(rsa, key);
 
@@ -326,8 +364,15 @@ RSA* SecKey_ToEngineRSAWithCert(Sec_KeyHandle *key, Sec_CertificateHandle *cert)
         return NULL;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     rsa->n = BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL);
     rsa->e = BN_bin2bn(pubKey.e, 4, NULL);
+#else
+    RSA_set0_key(rsa, 
+        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL), 
+        BN_bin2bn(pubKey.e, 4, NULL), 
+        NULL);
+#endif
 
     RSA_set_app_data(rsa, key);
 

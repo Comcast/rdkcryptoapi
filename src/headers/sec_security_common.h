@@ -278,6 +278,10 @@ Sec_Result SecSignature_IsValidKey(Sec_KeyType key_type,
  */
 SEC_BOOL SecSignature_IsRsa(Sec_SignatureAlgorithm alg);
 
+Sec_KeyType SecKey_GetRSAKeyTypeForBitLength(int numBits);
+
+Sec_KeyType SecKey_GetRSAKeyTypeForByteLength(int numBytes);
+
 /**
  * @brief Returns TRUE if the signature algorithm is an ECC variant
  *
@@ -463,6 +467,8 @@ SEC_BOOL SecKey_IsClearKeyContainer(Sec_KeyContainer kct);
  */
 Sec_KeyContainer SecKey_GetClearContainer(Sec_KeyType key_type);
 
+Sec_KeyType SecKey_GetKeyTypeForClearKeyContainer(Sec_KeyContainer kc);
+
 /**
  * @brief Find if the key with a specific id has been provisioned
  *
@@ -524,6 +530,8 @@ Sec_Result SecKey_ComputeBaseKeyLadderInputs(Sec_ProcessorHandle *secProcHandle,
  * @brief Check if provided algorithm takes digest as an input
  */
 SEC_BOOL SecSignature_IsDigest(Sec_SignatureAlgorithm alg);
+
+SEC_BOOL SecSignature_IsRsaPss(Sec_SignatureAlgorithm alg);
 
 /**
  * log callback function
@@ -723,6 +731,10 @@ Sec_Result SecKey_GenerateWrappedKeyAsn1Off(SEC_BYTE *payload, SEC_SIZE payloadL
                                          SEC_OBJECTID wrappingKeyId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
                                          SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset);
 
+Sec_Result SecKey_GenerateWrappedKeyAsn1V3(SEC_BYTE *payload, SEC_SIZE payloadLen, Sec_KeyType wrappedKeyType,
+                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, 
+                                         SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
+                                         SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset);
 /**
  * @brief Extract wrapped key params from ASN1KC
  */
@@ -736,6 +748,22 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1Off(Sec_Asn1KC *kc,
 Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferOff(SEC_BYTE *asn1, SEC_SIZE asn1_len,
                                                        SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
                                                        Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset);
+
+/**
+ * @brief Extract wrapped key params from ASN1KC
+ */
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1V3(Sec_Asn1KC *kc,
+                                              SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                              Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset,
+                                              SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, SEC_SIZE *writtenWrappingKey);
+
+/**
+ * @brief Extract wrapped key params from ASN1KC buffer
+ */
+Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferV3(SEC_BYTE *asn1, SEC_SIZE asn1_len,
+                                                      SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
+                                                      Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset,
+                                                      SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, SEC_SIZE *writtenWrappingKey);
 
 #endif
 

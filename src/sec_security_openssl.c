@@ -15,6 +15,7 @@
 
 #include "sec_security_openssl.h"
 #include "sec_security_utils.h"
+#include "sec_security_keyctrl.h"
 #include <stdlib.h>
 #include <string.h>
 #include <openssl/evp.h>
@@ -25,22 +26,89 @@
 #include <openssl/rsa.h>
 #include <openssl/err.h>
 #include <openssl/aes.h>
+#include "sec_security_asn1kc.h"
+
+#ifndef SEC_OBJECTID_COMCAST_XCALSESSIONMACKEY
+#define SEC_OBJECTID_COMCAST_XCALSESSIONMACKEY 0xffffffff00000001ULL
+#endif
+
+#ifndef SEC_OBJECTID_COMCAST_XCALSESSIONENCKEY
+#define SEC_OBJECTID_COMCAST_XCALSESSIONENCKEY 0xffffffff00000009ULL
+#endif
+
+
+#define EXPORT_KEY_HEADER_LEN (sizeof(_Sec_ExportedHeader) + sizeof(_Sec_KeyInfo))
+
+#define MULT_OF(x,y) (((y)+((x)-1))/(x))*(x)
+
+#define AES_BLOCK_MULT(x) MULT_OF(SEC_AES_BLOCK_SIZE, (x))
 
 #define CHECK_HANDLE(handle) \
     if (NULL == handle) { \
         SEC_LOG_ERROR("Invalid handle"); \
         return SEC_RESULT_INVALID_HANDLE; \
     }
-static SecOpenSSL_CustomProcessKeyContainer g_sec_openssl_cpkc = NULL;
 
-void SecOpenssl_RegisterCustomProcessKeyContainer(SecOpenSSL_CustomProcessKeyContainer func)
-{
-    g_sec_openssl_cpkc = func;
-}
+Sec_Result SecJType_ProcessKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID macingKid, const void *jwtToken,
+        SEC_SIZE jwtTokenLen, SEC_BYTE *out_wrappedKey, SEC_SIZE wrappedKeyBufSize,
+        SEC_SIZE *out_wrappedKeyWritten, Sec_KeyProperties *out_keyProps);
+
+static Sec_Result _SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
+        Sec_CipherAlgorithm algorithm, Sec_CipherMode mode, Sec_KeyHandle* key,
+        SEC_BYTE *iv, Sec_CipherHandle** cipherHandle, SEC_BOOL isUnwrap);
 
 int SecOpenSSL_DisablePassphrasePrompt(char *buf, int size, int rwflag, void *u)
 {
     return 0;
+}
+
+Sec_Result _SecCipher_SingleInput(Sec_ProcessorHandle *proc,
+        Sec_CipherAlgorithm alg, Sec_CipherMode mode, Sec_KeyHandle *key,
+        SEC_BYTE *iv, SEC_BYTE *input, SEC_SIZE input_len, SEC_BYTE *output,
+        SEC_SIZE output_len, SEC_SIZE *written)
+{
+    Sec_Result res = SEC_RESULT_FAILURE;
+    Sec_CipherHandle *cipher_handle = NULL;
+
+    res = _SecCipher_GetInstance(proc, alg, mode, key, iv, &cipher_handle, SEC_TRUE);
+    if (res != SEC_RESULT_SUCCESS)
+        return res;
+
+    res = SecCipher_Process(cipher_handle, input, input_len, 1, output,
+            output_len, written);
+    SecCipher_Release(cipher_handle);
+
+    return res;
+}
+
+Sec_Result _SecCipher_SingleInputId(Sec_ProcessorHandle *proc,
+        Sec_CipherAlgorithm alg, Sec_CipherMode mode, SEC_OBJECTID key,
+        SEC_BYTE *iv, SEC_BYTE *input, SEC_SIZE input_len, SEC_BYTE *output,
+        SEC_SIZE output_len, SEC_SIZE *written)
+{
+    Sec_Result res = SEC_RESULT_FAILURE;
+    Sec_KeyHandle *key_handle = NULL;
+
+    if (SEC_RESULT_SUCCESS != SecKey_GetInstance(proc, key, &key_handle))
+    {
+        SEC_LOG_ERROR("SecKey_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != _SecCipher_SingleInput(proc, alg, mode, key_handle, iv, input, input_len, output, output_len, written))
+    {
+        SEC_LOG_ERROR("SecCipher_SingleInput failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (key_handle != NULL)
+        SecKey_Release(key_handle);
+
+    return res;
 }
 
 Sec_Result _Sec_SignCertificateData(Sec_ProcessorHandle *proc,
@@ -151,6 +219,24 @@ Sec_Result _Sec_SymetricFromKeyHandle(Sec_KeyHandle *key, SEC_BYTE *out_key, SEC
         }
         AES_encrypt(inputs->input2, out_key, &aes_key);
     }
+    else if (keystore_header.inner_kc_type == SEC_OPENSSL_KEYCONTAINER_WITH_PROPS)
+    {
+        Sec_KeyProperties *props = (Sec_KeyProperties*)key_data;
+        if (props->keyType == SEC_KEYTYPE_AES_128)
+        {
+            if (out_key_len != SecStore_GetDataLen(key->key_data.kc.buffer) - sizeof(Sec_KeyProperties))
+            {
+                SEC_LOG_ERROR("Invalid key length in the store");
+                goto done;
+            }
+        }
+        else
+        {
+            SEC_LOG_ERROR("Unsupported keytype in container");
+            goto done;
+        }
+        memcpy(out_key, key_data+sizeof(Sec_KeyProperties), out_key_len);
+    }
     else
     {
         if (out_key_len != SecStore_GetDataLen(key->key_data.kc.buffer))
@@ -167,6 +253,30 @@ Sec_Result _Sec_SymetricFromKeyHandle(Sec_KeyHandle *key, SEC_BYTE *out_key, SEC
 done:
     Sec_Memset(key_data, 0, sizeof(key_data));
     Sec_Memset(ladder_1, 0, sizeof(ladder_1));
+
+    return res;
+}
+
+Sec_Result _Sec_SymetricFromKeyId(Sec_ProcessorHandle *proc, SEC_OBJECTID key_id, SEC_BYTE *out_key, SEC_SIZE out_key_len) {
+    Sec_KeyHandle *key = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    if (SEC_RESULT_SUCCESS != SecKey_GetInstance(proc, key_id, &key)) {
+        SEC_LOG_ERROR("SecKey_GetInstance failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyHandle(key, out_key, out_key_len)) {
+        SEC_LOG_ERROR("_Sec_SymetricFromKeyHandle failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (key != NULL) {
+        SecKey_Release(key);
+    }
 
     return res;
 }
@@ -204,6 +314,7 @@ RSA *_Sec_RSAFromKeyHandle(Sec_KeyHandle *key)
     {
     case SEC_KEYTYPE_RSA_1024:
     case SEC_KEYTYPE_RSA_2048:
+    case SEC_KEYTYPE_RSA_3072:
         rsa = SecUtils_RSAFromPrivBinary((Sec_RSARawPrivateKey*) key_data);
         if (rsa == NULL)
         {
@@ -214,6 +325,7 @@ RSA *_Sec_RSAFromKeyHandle(Sec_KeyHandle *key)
 
     case SEC_KEYTYPE_RSA_1024_PUBLIC:
     case SEC_KEYTYPE_RSA_2048_PUBLIC:
+    case SEC_KEYTYPE_RSA_3072_PUBLIC:
         rsa = SecUtils_RSAFromPubBinary((Sec_RSARawPublicKey*) key_data);
         if (rsa == NULL)
         {
@@ -347,6 +459,43 @@ void _Sec_FindRAMCertificateData(Sec_ProcessorHandle* secProcHandle,
     *parent = NULL;
 }
 
+static Sec_Result _Sec_ProcessExportKeyData(Sec_ProcessorHandle *proc,
+        Sec_CipherMode cipher_mode,
+        _Sec_ExportedHeader *expHeader,
+        SEC_BYTE *in_kc, SEC_SIZE in_kc_size,
+        SEC_BYTE *out_kc, SEC_SIZE out_kc_size, SEC_SIZE *out_kc_written)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+
+    if (SEC_RESULT_SUCCESS
+            != SecKey_Derive_KeyLadderAes128(proc, SEC_OBJECTID_OPENSSL_EXPORT,
+                    SEC_STORAGELOC_RAM, SEC_KEYLADDERROOT_UNIQUE,
+                    expHeader->derivation_input, expHeader->c1, NULL, NULL))
+    {
+        SEC_LOG_ERROR("SecKey_Derive_KeyLadderAes128 failed");
+        goto done;
+    }
+    if (SEC_RESULT_SUCCESS
+            != SecCipher_SingleInputId(proc,
+                    SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING,
+                    cipher_mode,
+                    SEC_OBJECTID_OPENSSL_EXPORT,
+                    expHeader->iv, in_kc, in_kc_size,
+                    out_kc, out_kc_size, out_kc_written))
+    {
+        SEC_LOG_ERROR("%s failed", cipher_mode == SEC_CIPHERMODE_DECRYPT ? "decrypt" : "encrypt");
+        goto done;
+    }
+
+    result = SEC_RESULT_SUCCESS;
+
+    done:
+
+    SecKey_Delete(proc, SEC_OBJECTID_OPENSSL_EXPORT);
+
+    return result;
+}
+
 Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         _Sec_KeyData *key_data, Sec_KeyContainer data_type, void *data,
         SEC_SIZE data_len, SEC_OBJECTID objectId)
@@ -362,6 +511,9 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
     SecUtils_KeyStoreHeader keystore_header;
     const unsigned char *p = (unsigned char*) data;
     PKCS8_PRIV_KEY_INFO *p8;
+    Sec_KeyProperties *keyProperties = NULL;
+    SEC_SIZE wrappedKeyLen = 2048;
+    SEC_BYTE wrappedKey[wrappedKeyLen];
 
     memset(key_data, 0, sizeof(_Sec_KeyData));
 
@@ -438,7 +590,8 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
     }
 
     if (data_type == SEC_KEYCONTAINER_RAW_RSA_1024
-            || data_type == SEC_KEYCONTAINER_RAW_RSA_2048)
+            || data_type == SEC_KEYCONTAINER_RAW_RSA_2048
+            || data_type == SEC_KEYCONTAINER_RAW_RSA_3072)
     {
         if (data_len != sizeof(Sec_RSARawPrivateKey))
         {
@@ -446,9 +599,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
             return SEC_RESULT_INVALID_PARAMETERS;
         }
 
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_RAW_RSA_1024) ?
-                        SEC_KEYTYPE_RSA_1024 : SEC_KEYTYPE_RSA_2048;
+        key_data->info.key_type = SecKey_GetKeyTypeForClearKeyContainer(data_type);
 
         /* validate the key */
         rsa = SecUtils_RSAFromPrivBinary((Sec_RSARawPrivateKey *) data);
@@ -467,7 +618,8 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
     }
 
     if (data_type == SEC_KEYCONTAINER_DER_RSA_1024
-            || data_type == SEC_KEYCONTAINER_DER_RSA_2048)
+            || data_type == SEC_KEYCONTAINER_DER_RSA_2048
+            || data_type == SEC_KEYCONTAINER_DER_RSA_3072)
     {
         p = (unsigned char*) data;
 
@@ -500,22 +652,19 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         }
 
         /* set key type */
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_DER_RSA_1024) ?
-                        SEC_KEYTYPE_RSA_1024 : SEC_KEYTYPE_RSA_2048;
+        key_data->info.key_type = SecKey_GetKeyTypeForClearKeyContainer(data_type);
 
         SecUtils_RSAToPrivBinary(rsa, &rsaPrivKey);
         SEC_RSA_FREE(rsa);
 
         return SecOpenSSL_ProcessKeyContainer(proc, key_data,
-                data_type == SEC_KEYCONTAINER_DER_RSA_1024 ?
-                        SEC_KEYCONTAINER_RAW_RSA_1024 :
-                        SEC_KEYCONTAINER_RAW_RSA_2048, &rsaPrivKey,
-                sizeof(rsaPrivKey), objectId);
+                SecKey_GetClearContainer(key_data->info.key_type), 
+                &rsaPrivKey, sizeof(rsaPrivKey), objectId);
     }
 
     if (data_type == SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC
-            || data_type == SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC)
+            || data_type == SEC_KEYCONTAINER_DER_RSA_2048_PUBLIC
+            || data_type == SEC_KEYCONTAINER_DER_RSA_3072_PUBLIC)
     {
         p = (unsigned char*) data;
         rsa = d2i_RSAPublicKey(&rsa, &p, data_len);
@@ -533,10 +682,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
             return SEC_RESULT_INVALID_PARAMETERS;
         }
 
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC) ?
-                        SEC_KEYTYPE_RSA_1024_PUBLIC :
-                        SEC_KEYTYPE_RSA_2048_PUBLIC;
+        key_data->info.key_type = SecKey_GetKeyTypeForClearKeyContainer(data_type);
 
         /* validate key */
         if (rsa == NULL || (SEC_SIZE) RSA_size(rsa) != SecKey_GetKeyLenForKeyType(key_data->info.key_type))
@@ -550,14 +696,13 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         SEC_RSA_FREE(rsa);
 
         return SecOpenSSL_ProcessKeyContainer(proc, key_data,
-                data_type == SEC_KEYCONTAINER_DER_RSA_1024_PUBLIC ?
-                        SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC :
-                        SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC, &rsaPubKey,
-                sizeof(rsaPubKey), objectId);
+                SecKey_GetClearContainer(key_data->info.key_type), 
+                &rsaPubKey, sizeof(rsaPubKey), objectId);
     }
 
     if (data_type == SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC
-            || data_type == SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC)
+            || data_type == SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC
+            || data_type == SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC)
     {
         if (data_len != sizeof(Sec_RSARawPublicKey))
         {
@@ -565,10 +710,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
             return SEC_RESULT_INVALID_PARAMETERS;
         }
 
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC) ?
-                        SEC_KEYTYPE_RSA_1024_PUBLIC :
-                        SEC_KEYTYPE_RSA_2048_PUBLIC;
+        key_data->info.key_type = SecKey_GetKeyTypeForClearKeyContainer(data_type);
 
         /* validate the key */
         rsa = SecUtils_RSAFromPubBinary((Sec_RSARawPublicKey *) data);
@@ -589,7 +731,8 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
     }
 
     if (data_type == SEC_KEYCONTAINER_PEM_RSA_1024
-            || data_type == SEC_KEYCONTAINER_PEM_RSA_2048)
+            || data_type == SEC_KEYCONTAINER_PEM_RSA_2048
+            || data_type == SEC_KEYCONTAINER_PEM_RSA_3072)
     {
         bio = BIO_new_mem_buf(data, data_len);
         rsa = PEM_read_bio_RSAPrivateKey(bio, &rsa,
@@ -597,9 +740,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         SEC_BIO_FREE(bio);
         bio = NULL;
 
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_PEM_RSA_1024) ?
-                        SEC_KEYTYPE_RSA_1024 : SEC_KEYTYPE_RSA_2048;
+        key_data->info.key_type = SecKey_GetKeyTypeForClearKeyContainer(data_type);
 
         /* validate key */
         if (rsa == NULL
@@ -615,14 +756,13 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         SEC_RSA_FREE(rsa);
 
         return SecOpenSSL_ProcessKeyContainer(proc, key_data,
-                data_type == SEC_KEYCONTAINER_PEM_RSA_1024 ?
-                        SEC_KEYCONTAINER_RAW_RSA_1024 :
-                        SEC_KEYCONTAINER_RAW_RSA_2048, &rsaPrivKey,
+                SecKey_GetClearContainer(key_data->info.key_type), &rsaPrivKey,
                 sizeof(rsaPrivKey), objectId);
     }
 
     if (data_type == SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC
-            || data_type == SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC)
+            || data_type == SEC_KEYCONTAINER_PEM_RSA_2048_PUBLIC
+            || data_type == SEC_KEYCONTAINER_PEM_RSA_3072_PUBLIC)
     {
         bio = BIO_new_mem_buf(data, data_len);
         rsa = PEM_read_bio_RSA_PUBKEY(bio, &rsa, SecOpenSSL_DisablePassphrasePrompt,
@@ -630,17 +770,11 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         SEC_BIO_FREE(bio);
         bio = NULL;
 
-        key_data->info.key_type =
-                (data_type == SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC) ?
-                        SEC_KEYTYPE_RSA_1024_PUBLIC :
-                        SEC_KEYTYPE_RSA_2048_PUBLIC;
+        key_data->info.key_type =SecKey_GetKeyTypeForClearKeyContainer(data_type);;
 
         /* validate key */
         if (rsa == NULL || (SEC_SIZE) RSA_size(rsa) != SecKey_GetKeyLenForKeyType(key_data->info.key_type))
         {
-            // SEC_LOG_ERROR("RSA_size(rsa) %d != SecKey_GetKeyLenForKeyType(key_data->info.key_type) %d",
-            //        rsa == NULL ? -1 : RSA_size(rsa),
-            //        SecKey_GetKeyLenForKeyType(key_data->info.key_type));
             SEC_RSA_FREE(rsa);
             SEC_LOG_ERROR("Invalid RSA key container");
             return SEC_RESULT_INVALID_PARAMETERS;
@@ -650,10 +784,8 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         SEC_RSA_FREE(rsa);
 
         return SecOpenSSL_ProcessKeyContainer(proc, key_data,
-                data_type == SEC_KEYCONTAINER_PEM_RSA_1024_PUBLIC ?
-                        SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC :
-                        SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC, &rsaPubKey,
-                sizeof(rsaPubKey), objectId);
+                SecKey_GetClearContainer(key_data->info.key_type), 
+                &rsaPubKey, sizeof(rsaPubKey), objectId);
     }
 
     if (data_type == SEC_OPENSSL_KEYCONTAINER_DERIVED)
@@ -782,7 +914,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
         }
 
         key_data->info.key_type = SEC_KEYTYPE_ECC_NISTP256;
-        if (SEC_RESULT_FAILURE == SecUtils_ECCToPrivBinary(ec_key, &ecPrivKey))
+        if (SEC_RESULT_SUCCESS != SecUtils_ECCToPrivBinary(ec_key, &ecPrivKey))
         {
             SEC_LOG_ERROR("SecUtils_ECCToPrivBinary failed");
             SEC_ECC_FREE(ec_key);
@@ -810,7 +942,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
 
         key_data->info.key_type = SEC_KEYTYPE_ECC_NISTP256_PUBLIC;
 
-        if (SEC_RESULT_FAILURE == SecUtils_ECCToPubBinary(ec_key, &ecPubKey))
+        if (SEC_RESULT_SUCCESS != SecUtils_ECCToPubBinary(ec_key, &ecPubKey))
         {
             SEC_LOG_ERROR("SecUtils_ECCToPubBinary failed");
             SEC_ECC_FREE(ec_key);
@@ -858,7 +990,7 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
 
         key_data->info.key_type = SEC_KEYTYPE_ECC_NISTP256_PUBLIC;
 
-        if (SEC_RESULT_FAILURE == SecUtils_ECCToPubBinary(ec_key, &ecPubKey))
+        if (SEC_RESULT_SUCCESS != SecUtils_ECCToPubBinary(ec_key, &ecPubKey))
         {
             SEC_LOG_ERROR("SecUtils_ECCToPubBinary failed");
             SEC_ECC_FREE(ec_key);
@@ -870,9 +1002,324 @@ Sec_Result SecOpenSSL_ProcessKeyContainer(Sec_ProcessorHandle *proc,
                 sizeof(ecPubKey), objectId);
     }
 
-    if (g_sec_openssl_cpkc != NULL)
+    if (data_type == SEC_KEYCONTAINER_ASN1)
     {
-        return g_sec_openssl_cpkc(proc, key_data, data_type, data, data_len, objectId);
+        SEC_BYTE tempkc[SEC_KEYCONTAINER_MAX_LEN];
+        SEC_SIZE tempkcLen;
+        Sec_KeyContainer tempkcType;
+        Sec_KeyType wrappedKeyType;
+        SEC_OBJECTID wrappingId;
+        SEC_BYTE wrappingIv[SEC_AES_BLOCK_SIZE];
+        Sec_CipherAlgorithm wrappingAlg;
+        SEC_SIZE wrappedKeyOffset;
+        SEC_BYTE wrappingKey[SEC_KEYCONTAINER_MAX_LEN];
+        SEC_SIZE wrappingKeyLen;
+
+        Sec_Asn1KC *asn1kc = SecAsn1KC_Decode(data, data_len);
+        if (asn1kc == NULL)
+        {
+            SEC_LOG_ERROR("SecAsn1KC_Decode failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        if (SEC_RESULT_SUCCESS != SecKey_ExtractWrappedKeyParamsAsn1V3(asn1kc, tempkc, sizeof(tempkc), &tempkcLen,
+                                                                     &wrappedKeyType, &wrappingId, wrappingIv, &wrappingAlg,
+                                                                     &wrappedKeyOffset,
+                                                                     wrappingKey, sizeof(wrappingKey), &wrappingKeyLen))
+        {
+            SEC_LOG_ERROR("SecKey_ExtractWrappedKeyParamsAsn1V3 failed");
+            SecAsn1KC_Free(asn1kc);
+            return SEC_RESULT_FAILURE;
+        }
+
+        SecAsn1KC_Free(asn1kc);
+
+        if (wrappingKeyLen > 0) {
+            //V3
+
+            //get free id
+            SEC_OBJECTID tempId = SecKey_ObtainFreeObjectId(proc, SEC_OBJECTID_RESERVED_BASE, SEC_OBJECTID_RESERVED_TOP);
+            if (SEC_OBJECTID_INVALID == tempId) {
+                SEC_LOG_ERROR("SecKey_ObtainFreeObjectId failed");
+                return SEC_RESULT_FAILURE;
+            }
+
+            //provision wrapping key
+            if (SEC_RESULT_SUCCESS != SecKey_Provision(proc, tempId, SEC_STORAGELOC_RAM, SEC_KEYCONTAINER_ASN1, wrappingKey, wrappingKeyLen)) {
+                SEC_LOG_ERROR("SecKey_Provision failed");
+                return SEC_RESULT_FAILURE;
+            }
+
+            //unwrap
+
+            if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc,
+                    wrappingAlg, SEC_CIPHERMODE_DECRYPT, tempId,
+                    wrappingIv, tempkc, tempkcLen, tempkc,
+                    sizeof(tempkc), &tempkcLen)) {
+                SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+                SecKey_Delete(proc, tempId);
+                return SEC_RESULT_FAILURE;
+            }
+
+            //release wrapping key
+            SecKey_Delete(proc, tempId);
+
+            Sec_ECCRawOnlyPrivateKey eccRawOnlyPrivKey;
+            switch(wrappedKeyType)
+            {
+            case SEC_KEYTYPE_RSA_1024:
+                tempkcType = SEC_KEYCONTAINER_DER_RSA_1024;
+                break;
+            case SEC_KEYTYPE_RSA_2048:
+                tempkcType = SEC_KEYCONTAINER_DER_RSA_2048;
+                break;
+            case SEC_KEYTYPE_ECC_NISTP256:
+                tempkcType = SEC_KEYCONTAINER_RAW_ECC_PRIVONLY_NISTP256;
+
+                // Convert a 32 byte value into a raw ECC structure prv value
+                memcpy(eccRawOnlyPrivKey.prv, tempkc, sizeof(eccRawOnlyPrivKey));
+                tempkcLen = sizeof(eccRawOnlyPrivKey);
+                memcpy(tempkc, &eccRawOnlyPrivKey, tempkcLen);
+                break;
+            case SEC_KEYTYPE_AES_128:
+                tempkcType = SEC_KEYCONTAINER_RAW_AES_128;
+                break;
+            case SEC_KEYTYPE_AES_256:
+                tempkcType = SEC_KEYCONTAINER_RAW_AES_256;
+                break;
+            case SEC_KEYTYPE_HMAC_128:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_128;
+                break;
+            case SEC_KEYTYPE_HMAC_160:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_160;
+                break;
+            case SEC_KEYTYPE_HMAC_256:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_256;
+                break;
+            default:
+                SEC_LOG_ERROR("Wrapped keyType is not yet supported");
+                return SEC_RESULT_FAILURE;
+            }
+
+            if (wrappedKeyOffset > 0 && !SecKey_IsSymetric(wrappedKeyType)) {
+                SEC_LOG_ERROR("Only wrapped symetric keys can specify an offset");
+                return SEC_RESULT_FAILURE;
+            }
+
+            /* process the unwrapped key */
+            if (SecKey_IsSymetric(wrappedKeyType)) {
+                if ((tempkcLen - wrappedKeyOffset) < SecKey_GetKeyLenForKeyType(wrappedKeyType)) {
+                    SEC_LOG_ERROR("payload is too small(%d) for specified offset %d", tempkcLen, wrappedKeyOffset);
+                        return SEC_RESULT_FAILURE;
+                }
+
+                if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc,
+                        key_data, tempkcType, &tempkc[wrappedKeyOffset],
+                        SecKey_GetKeyLenForKeyType(wrappedKeyType), objectId))
+                {
+                    SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
+                    return SEC_RESULT_FAILURE;
+                }
+            } else {
+                if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc,
+                        key_data, tempkcType, tempkc,
+                        tempkcLen, objectId))
+                {
+                    SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
+                    return SEC_RESULT_FAILURE;
+                }
+            }
+
+            return SEC_RESULT_SUCCESS;
+        } else {
+            //V2
+            if (SEC_RESULT_SUCCESS != _SecCipher_SingleInputId(proc,
+                    wrappingAlg, SEC_CIPHERMODE_DECRYPT, wrappingId,
+                    wrappingIv, tempkc, tempkcLen, tempkc,
+                    sizeof(tempkc), &tempkcLen))
+            {
+                SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+                return SEC_RESULT_FAILURE;
+            }
+
+            Sec_ECCRawOnlyPrivateKey eccRawOnlyPrivKey;
+
+            switch(wrappedKeyType)
+            {
+            case SEC_KEYTYPE_RSA_1024:
+                tempkcType = SEC_KEYCONTAINER_DER_RSA_1024;
+                break;
+            case SEC_KEYTYPE_RSA_2048:
+                tempkcType = SEC_KEYCONTAINER_DER_RSA_2048;
+                break;
+            case SEC_KEYTYPE_ECC_NISTP256:
+                tempkcType = SEC_KEYCONTAINER_RAW_ECC_PRIVONLY_NISTP256;
+
+                // Convert a 32 byte value into a raw ECC structure prv value
+                memcpy(eccRawOnlyPrivKey.prv, tempkc, sizeof(eccRawOnlyPrivKey));
+                tempkcLen = sizeof(eccRawOnlyPrivKey);
+                memcpy(tempkc, &eccRawOnlyPrivKey, tempkcLen);
+                break;
+            case SEC_KEYTYPE_AES_128:
+                tempkcType = SEC_KEYCONTAINER_RAW_AES_128;
+                break;
+            case SEC_KEYTYPE_AES_256:
+                tempkcType = SEC_KEYCONTAINER_RAW_AES_256;
+                break;
+            case SEC_KEYTYPE_HMAC_128:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_128;
+                break;
+            case SEC_KEYTYPE_HMAC_160:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_160;
+                break;
+            case SEC_KEYTYPE_HMAC_256:
+                tempkcType = SEC_KEYCONTAINER_RAW_HMAC_256;
+                break;
+            default:
+                SEC_LOG_ERROR("Wrapped keyType is not yet supported");
+                return SEC_RESULT_FAILURE;
+            }
+
+            if (wrappedKeyOffset > 0 && !SecKey_IsSymetric(wrappedKeyType)) {
+                SEC_LOG_ERROR("Only wrapped symetric keys can specify an offset");
+                return SEC_RESULT_FAILURE;
+            }
+
+            /* process the unwrapped key */
+            if (SecKey_IsSymetric(wrappedKeyType)) {
+                if ((tempkcLen - wrappedKeyOffset) < SecKey_GetKeyLenForKeyType(wrappedKeyType)) {
+                    SEC_LOG_ERROR("payload is too small(%d) for specified offset %d", tempkcLen, wrappedKeyOffset);
+                        return SEC_RESULT_FAILURE;
+                }
+
+                if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc,
+                        key_data, tempkcType, &tempkc[wrappedKeyOffset],
+                        SecKey_GetKeyLenForKeyType(wrappedKeyType), objectId))
+                {
+                    SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
+                    return SEC_RESULT_FAILURE;
+                }
+            } else {
+                if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc,
+                        key_data, tempkcType, tempkc,
+                        tempkcLen, objectId))
+                {
+                    SEC_LOG_ERROR("SecOpenSSL_ProcessKeyContainer failed");
+                    return SEC_RESULT_FAILURE;
+                }
+            }
+
+            return SEC_RESULT_SUCCESS;
+        }
+    }
+
+    if (data_type == SEC_KEYCONTAINER_JTYPE)
+    {
+        SEC_BYTE tempkc[SEC_KEYCONTAINER_MAX_LEN];
+        SEC_SIZE tempkcLen;
+        Sec_KeyProperties lkp;
+
+        if (SEC_RESULT_SUCCESS
+                != SecJType_ProcessKey(proc, SEC_OBJECTID_COMCAST_XCALSESSIONMACKEY,
+                        data,
+                        data_len,
+                        wrappedKey, sizeof(wrappedKey), &wrappedKeyLen,
+                        &lkp))
+        {
+            SEC_LOG_ERROR("SecJtype_ProcessKey failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        /* unwrap */
+        if (SEC_RESULT_SUCCESS
+                != SecCipher_SingleInputId(proc,
+                        SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING,
+                        SEC_CIPHERMODE_DECRYPT,
+                        SEC_OBJECTID_COMCAST_XCALSESSIONENCKEY,
+                        NULL, wrappedKey, wrappedKeyLen,
+                        tempkc + sizeof(Sec_KeyProperties),
+                        sizeof(tempkc) - sizeof(Sec_KeyProperties), &tempkcLen))
+        {
+            SEC_LOG_ERROR("SecCipher_Process failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        if (tempkcLen != 16)
+        {
+            SEC_LOG_ERROR(
+                    "Expecting key size of 16 bytes for jtype key. received %u",
+                    tempkcLen);
+            return SEC_RESULT_FAILURE;
+        }
+
+        lkp.keyType = SEC_KEYTYPE_AES_128;
+        lkp.keyLength = tempkcLen;
+
+        if (sizeof(tempkc) < (tempkcLen + sizeof(Sec_KeyProperties)))
+        {
+            SEC_LOG_ERROR("jtype temp buffer too small");
+            return SEC_RESULT_FAILURE;
+        }
+
+        memcpy(tempkc, &lkp, sizeof(Sec_KeyProperties));
+        tempkcLen += sizeof(Sec_KeyProperties);
+
+        if (SEC_RESULT_SUCCESS != SecOpenSSL_ProcessKeyContainer(proc, key_data,
+                        SEC_OPENSSL_KEYCONTAINER_WITH_PROPS, tempkc, tempkcLen,
+                        objectId))
+        {
+            SEC_LOG_ERROR("SVP ProcessKeyContainer failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        return SEC_RESULT_SUCCESS;
+    }
+
+    if (data_type == SEC_OPENSSL_KEYCONTAINER_WITH_PROPS)
+    {
+        keyProperties = (Sec_KeyProperties*)data;
+
+        if (keyProperties->keyType == SEC_KEYTYPE_AES_128)
+        {
+           if (data_len != 16 + sizeof(Sec_KeyProperties))
+           {
+               SEC_LOG_ERROR("Invalid container length. size=%lu, expected=%lu",
+                       data_len, (16 + sizeof(Sec_KeyProperties)));
+               return SEC_RESULT_FAILURE;
+           }
+        }
+        else
+        {
+            SEC_LOG_ERROR("unsupported keytype for container");
+            return SEC_RESULT_FAILURE;
+        }
+
+        key_data->info.key_type = keyProperties->keyType;
+
+        goto store_data;
+    }
+
+    if (data_type == SEC_KEYCONTAINER_EXPORTED)
+    {
+        SEC_SIZE key_len = 0;
+        _Sec_KeyInfo *keyInfo = (_Sec_KeyInfo*)(data + sizeof(_Sec_ExportedHeader));
+
+        if (SEC_RESULT_SUCCESS
+                != _Sec_ProcessExportKeyData(proc, SEC_CIPHERMODE_DECRYPT,
+                        (_Sec_ExportedHeader*)data,
+                        data + EXPORT_KEY_HEADER_LEN,
+                        data_len - EXPORT_KEY_HEADER_LEN,
+                        wrappedKey, sizeof(wrappedKey), &wrappedKeyLen))
+        {
+            SEC_LOG_ERROR("_Sec_ProcessExportKeyData failed on provision");
+
+            return SEC_RESULT_FAILURE;
+        }
+        memcpy(&key_len, wrappedKey, sizeof(SEC_SIZE));
+
+        return SecOpenSSL_ProcessKeyContainer(proc, key_data,
+                keyInfo->kc_type,
+                wrappedKey+sizeof(SEC_SIZE), key_len, objectId);
     }
 
     SEC_LOG_ERROR("Unimplemented key container type");
@@ -1618,19 +2065,21 @@ SEC_SIZE SecProcessor_GetKeyLadderMaxDepth(Sec_ProcessorHandle* handle, Sec_KeyL
  *  - Release
  */
 
-Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
+static Sec_Result _SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
         Sec_CipherAlgorithm algorithm, Sec_CipherMode mode, Sec_KeyHandle* key,
-        SEC_BYTE *iv, Sec_CipherHandle** cipherHandle)
+        SEC_BYTE *iv, Sec_CipherHandle** cipherHandle, SEC_BOOL isUnwrap)
 {
     Sec_CipherHandle localHandle;
     const EVP_CIPHER *evp_cipher = NULL;
     Sec_Result res = SEC_RESULT_FAILURE;
     SEC_BYTE symetric_key[SEC_SYMETRIC_KEY_MAX_LEN];
     int padding = 0;
+    Sec_KeyProperties keyProps;
 
     CHECK_HANDLE(secProcHandle);
 
     memset(&localHandle, 0, sizeof(localHandle));
+    memset(&keyProps,0, sizeof(Sec_KeyProperties));
 
     if (SEC_RESULT_SUCCESS
             != SecCipher_IsValidKey(key->key_data.info.key_type, algorithm, mode,
@@ -1640,12 +2089,51 @@ Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
         goto done;
     }
 
+    if (SEC_RESULT_SUCCESS != SecKey_GetProperties(key, &keyProps))
+    {
+        SEC_LOG_ERROR("SecKey_GetProperties failed");
+        return SEC_RESULT_FAILURE;
+    }
+    /* a key with non-default props was a jtype or exported type */
+    if (SEC_FALSE == SecKeyCtrl_IsDefaultKeyProperties(&keyProps))
+    {
+        if (isUnwrap) {
+            if (keyProps.usage != SEC_KEYUSAGE_KEY
+                    && keyProps.usage != SEC_KEYUSAGE_DATA_KEY)
+            {
+                SEC_LOG_ERROR(
+                        "Key usage does not have `key` capabilities.  usage=%d",
+                        keyProps.usage);
+                return SEC_RESULT_FAILURE;
+            }
+        } else {
+            if (keyProps.usage != SEC_KEYUSAGE_DATA
+                    && keyProps.usage != SEC_KEYUSAGE_DATA_KEY)
+            {
+                SEC_LOG_ERROR(
+                        "Key usage does not have `data` capabilities.  usage=%d",
+                        keyProps.usage);
+                return SEC_RESULT_FAILURE;
+            }            
+        }
+        /* validate key properties */
+        if (SEC_RESULT_SUCCESS
+                != (res = SecKeyCtrl_ValidateKeyProperties(&secProcHandle->device_settings_init_flag,
+                        &keyProps,
+                        SEC_FALSE)))
+        {
+            SEC_LOG_ERROR("SecKeyCtrl_ValidateKeyProperties failed");
+            return res;
+        }
+    }
+
     switch (algorithm)
     {
     case SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING:
     case SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING:
     case SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING:
     case SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING:
+    case SEC_CIPHERALGORITHM_AES_CTR:
         if (algorithm == SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING
                 || algorithm == SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING)
         {
@@ -1662,30 +2150,42 @@ Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
             else
                 evp_cipher = EVP_aes_256_cbc();
         }
+        else if (algorithm == SEC_CIPHERALGORITHM_AES_CTR)
+        {
+            if (key->key_data.info.key_type == SEC_KEYTYPE_AES_128)
+                evp_cipher = EVP_aes_128_ctr();
+            else
+                evp_cipher = EVP_aes_256_ctr();
+        }
 
-        EVP_CIPHER_CTX_init(&localHandle.evp_ctx);
+        localHandle.evp_ctx = EVP_CIPHER_CTX_new();
+        if (localHandle.evp_ctx == NULL) {
+            SEC_LOG_ERROR("EVP_CIPHER_CTX_new failed");
+            goto done;
+        }
 
-        if (1
-                != EVP_CipherInit_ex(&localHandle.evp_ctx, evp_cipher, NULL,
+        EVP_CIPHER_CTX_init(localHandle.evp_ctx);
+
+        if (1 != EVP_CipherInit_ex(localHandle.evp_ctx, evp_cipher, NULL,
                             NULL, NULL, (mode == SEC_CIPHERMODE_ENCRYPT || mode == SEC_CIPHERMODE_ENCRYPT_NATIVEMEM) ? 1 : 0))
         {
             SEC_LOG_ERROR("EVP_CipherInit failed");
             goto done;
         }
 
-        if (1 != EVP_CIPHER_CTX_set_padding(&localHandle.evp_ctx, padding))
+        if (1 != EVP_CIPHER_CTX_set_padding(localHandle.evp_ctx, padding))
         {
             SEC_LOG_ERROR("EVP_CIPHER_CTX_set_padding failed");
             goto done;
         }
 
-            if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyHandle(key, symetric_key, SecKey_GetKeyLen(key)))
+        if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyHandle(key, symetric_key, SecKey_GetKeyLen(key)))
         {
             SEC_LOG_ERROR("_Sec_SymetricFromKeyHandle failed");
             goto done;
         }
 
-            if (1 != EVP_CipherInit_ex(&localHandle.evp_ctx, NULL, NULL,
+        if (1 != EVP_CipherInit_ex(localHandle.evp_ctx, NULL, NULL,
                         symetric_key, iv,
                             (mode == SEC_CIPHERMODE_ENCRYPT || mode == SEC_CIPHERMODE_ENCRYPT_NATIVEMEM) ? 1 : 0))
         {
@@ -1693,25 +2193,6 @@ Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
             goto done;
         }
 
-        break;
-
-    case SEC_CIPHERALGORITHM_AES_CTR:
-        memset(&localHandle.ctr_ctx, 0, sizeof(localHandle.ctr_ctx));
-        memcpy(localHandle.ctr_ctx.ivec, iv, 16);
-
-            if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyHandle(key, symetric_key, SecKey_GetKeyLen(key)))
-        {
-            SEC_LOG_ERROR("_Sec_SymetricFromKeyHandle failed");
-            goto done;
-        }
-
-            if (0 != AES_set_encrypt_key(symetric_key,
-                            SecKey_GetKeyLen(key) * 8,
-                        &localHandle.ctr_ctx.aes_key))
-        {
-            SEC_LOG_ERROR("%s", ERR_error_string(ERR_get_error(), NULL));
-            goto done;
-        }
         break;
 
     case SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING:
@@ -1740,8 +2221,22 @@ Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
     res = SEC_RESULT_SUCCESS;
 
 done:
+    if (res != SEC_RESULT_SUCCESS) {
+        if (localHandle.evp_ctx != NULL) {
+            EVP_CIPHER_CTX_free(localHandle.evp_ctx);
+        }
+    }
     Sec_Memset(symetric_key, 0, sizeof(symetric_key));
     return res;
+}
+
+Sec_Result SecCipher_GetInstance(Sec_ProcessorHandle* secProcHandle,
+        Sec_CipherAlgorithm algorithm, Sec_CipherMode mode, Sec_KeyHandle* key,
+        SEC_BYTE *iv, Sec_CipherHandle** cipherHandle) {
+
+    return _SecCipher_GetInstance(secProcHandle,
+        algorithm, mode, key,
+        iv, cipherHandle, SEC_FALSE);
 }
 
 Sec_Result SecCipher_UpdateIV(Sec_CipherHandle* cipherHandle, SEC_BYTE* iv) {
@@ -1750,14 +2245,13 @@ Sec_Result SecCipher_UpdateIV(Sec_CipherHandle* cipherHandle, SEC_BYTE* iv) {
     if (cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING
     			|| cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING
     			|| cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING
-				|| cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING) {
-		if (1 != EVP_CipherInit_ex(&cipherHandle->evp_ctx, NULL, NULL, NULL, iv, -1))
+				|| cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING
+                || cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_CTR) {
+		if (1 != EVP_CipherInit_ex(cipherHandle->evp_ctx, NULL, NULL, NULL, iv, -1))
 		{
 			SEC_LOG_ERROR("EVP_CipherInit failed");
 			return SEC_RESULT_FAILURE;
 		}
-    } else if(cipherHandle->algorithm == SEC_CIPHERALGORITHM_AES_CTR) {
-		memcpy(cipherHandle->ctr_ctx.ivec, iv, SEC_AES_BLOCK_SIZE);
     }
 
     return SEC_RESULT_SUCCESS;
@@ -1886,9 +2380,9 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
     {
     case SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING:
     case SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING:
+    case SEC_CIPHERALGORITHM_AES_CTR:
         out_len = 0;
-            if (1 != EVP_CipherUpdate(&cipherHandle->evp_ctx, output,
-                            &out_len, input, inputSize))
+        if (1 != EVP_CipherUpdate(cipherHandle->evp_ctx, output, &out_len, input, inputSize))
         {
             SEC_LOG_ERROR("EVP_CipherUpdate failed");
             goto done;
@@ -1896,9 +2390,7 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
         *bytesWritten += out_len;
         out_len = 0;
 
-        if (lastInput
-                && 1 != EVP_CipherFinal_ex(&cipherHandle->evp_ctx,
-                                &output[*bytesWritten], &out_len))
+        if (lastInput && 1 != EVP_CipherFinal_ex(cipherHandle->evp_ctx, &output[*bytesWritten], &out_len))
         {
             SEC_LOG_ERROR("EVP_CipherFinal failed");
             goto done;
@@ -1912,7 +2404,7 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
         out_len = 0;
 
         /* process all blocks except for the last, partial one */
-            if (1 != EVP_CipherUpdate(&cipherHandle->evp_ctx, output,
+            if (1 != EVP_CipherUpdate(cipherHandle->evp_ctx, output,
                             &out_len, input, (inputSize / 16) * 16))
         {
             SEC_LOG_ERROR("EVP_CipherUpdate failed");
@@ -1921,14 +2413,14 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
         *bytesWritten += out_len;
         out_len = 0;
 
-            if (lastInput && (cipherHandle->mode == SEC_CIPHERMODE_ENCRYPT || cipherHandle->mode == SEC_CIPHERMODE_ENCRYPT_NATIVEMEM))
+        if (lastInput && (cipherHandle->mode == SEC_CIPHERMODE_ENCRYPT || cipherHandle->mode == SEC_CIPHERMODE_ENCRYPT_NATIVEMEM))
         {
             /* create padded block */
                 SecCipher_PadAESPKCS7Block(input == NULL ? NULL : (input + ((inputSize / 16) * 16)),
                     inputSize % SEC_AES_BLOCK_SIZE, aes_padded_block);
 
             /* process padded block */
-            if (1 != EVP_CipherUpdate(&cipherHandle->evp_ctx,
+            if (1 != EVP_CipherUpdate(cipherHandle->evp_ctx,
                             &output[(inputSize / 16) * 16], &out_len,
                             aes_padded_block, SEC_AES_BLOCK_SIZE))
             {
@@ -1939,7 +2431,7 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
             out_len = 0;
 
             if (lastInput
-                    && 1 != EVP_CipherFinal_ex(&cipherHandle->evp_ctx,
+                    && 1 != EVP_CipherFinal_ex(cipherHandle->evp_ctx,
                                     &output[*bytesWritten], &out_len))
             {
                 SEC_LOG_ERROR("EVP_CipherFinal failed");
@@ -1947,11 +2439,11 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
             }
             *bytesWritten += out_len;
         }
-            else if (lastInput && (cipherHandle->mode == SEC_CIPHERMODE_DECRYPT || cipherHandle->mode == SEC_CIPHERMODE_DECRYPT_NATIVEMEM))
+        else if (lastInput && (cipherHandle->mode == SEC_CIPHERMODE_DECRYPT || cipherHandle->mode == SEC_CIPHERMODE_DECRYPT_NATIVEMEM))
         {
             out_len = 0;
             if (lastInput
-                    && 1 != EVP_CipherFinal(&cipherHandle->evp_ctx,
+                    && 1 != EVP_CipherFinal(cipherHandle->evp_ctx,
                                     &output[*bytesWritten], &out_len))
             {
                 SEC_LOG_ERROR("EVP_CipherFinal failed");
@@ -1979,17 +2471,6 @@ Sec_Result SecCipher_Process(Sec_CipherHandle* cipherHandle, SEC_BYTE* input,
                 *bytesWritten -= pad_val;
             }
         }
-        break;
-
-    case SEC_CIPHERALGORITHM_AES_CTR:
-        if (inputSize > 0)
-        {
-            AES_ctr128_encrypt(input, output, inputSize,
-                               &(cipherHandle->ctr_ctx.aes_key),
-                               cipherHandle->ctr_ctx.ivec, cipherHandle->ctr_ctx.ecount,
-                               &(cipherHandle->ctr_ctx.num));
-        }
-        *bytesWritten = inputSize;
         break;
 
     case SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING:
@@ -2118,14 +2599,10 @@ Sec_Result SecCipher_Release(Sec_CipherHandle* cipherHandle)
     case SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING:
     case SEC_CIPHERALGORITHM_AES_ECB_PKCS7_PADDING:
     case SEC_CIPHERALGORITHM_AES_CBC_PKCS7_PADDING:
-        if (EVP_CIPHER_CTX_cleanup(&(cipherHandle->evp_ctx)) != 1)
-        {
-            SEC_LOG_ERROR("EVP_CIPHER_CTX_cleanup failed");
-        }
-        break;
-
     case SEC_CIPHERALGORITHM_AES_CTR:
-        Sec_Memset(&cipherHandle->ctr_ctx, 0, sizeof(cipherHandle->ctr_ctx));
+        if (cipherHandle->evp_ctx != NULL) {
+            EVP_CIPHER_CTX_free(cipherHandle->evp_ctx);
+        }
         break;
 
     case SEC_CIPHERALGORITHM_RSA_PKCS1_PADDING:
@@ -2142,7 +2619,8 @@ Sec_Result SecCipher_Release(Sec_CipherHandle* cipherHandle)
     SEC_FREE(cipherHandle);
     return SEC_RESULT_SUCCESS;
 
-    unimplemented: return SEC_RESULT_UNIMPLEMENTED_FEATURE;
+unimplemented:
+    return SEC_RESULT_UNIMPLEMENTED_FEATURE;
 }
 
 Sec_Result SecDigest_GetInstance(Sec_ProcessorHandle* secProcHandle,
@@ -2430,27 +2908,13 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
         else if (SecSignature_IsEcc(signatureHandle->algorithm))
         {
             ec_key = _Sec_ECCFromKeyHandle(signatureHandle->key_handle);
-            ECDSA_SIG *esig = NULL;
-
             if (NULL == ec_key)
             {
                 SEC_LOG_ERROR("_Sec_ECCFromKeyHandle failed");
                 return SEC_RESULT_FAILURE;
             }
 
-            /* Computes ECDSA signature of a given hash value using
-             *  the supplied private key
-             *
-             *  ECDSA_SIG* ECDSA_do_sign(const unsigned char *dgst, int dgst_len,
-             *                           EC_KEY *ec_key);
-             *  where
-             *  struct {
-             *    BIGNUM *r;
-             *    BIGNUM *s;
-             *  } ECDSA_SIG;
-             */
-
-            esig = ECDSA_do_sign(digest, digest_len, ec_key);
+            ECDSA_SIG *esig = ECDSA_do_sign(digest, digest_len, ec_key);
 
             SEC_ECC_FREE(ec_key);
 
@@ -2460,14 +2924,19 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
                 return SEC_RESULT_FAILURE;
             }
 
-            SecUtils_BigNumToBuffer(esig->r, &signature[0],
-                    SEC_ECC_NISTP256_KEY_LEN);
-            SecUtils_BigNumToBuffer(esig->s,
-                    &signature[SEC_ECC_NISTP256_KEY_LEN],
-                    SEC_ECC_NISTP256_KEY_LEN);
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+            SecUtils_BigNumToBuffer(esig->r, &signature[0], SEC_ECC_NISTP256_KEY_LEN);
+            SecUtils_BigNumToBuffer(esig->s, &signature[SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN);
+#else
+            const BIGNUM *esigr = NULL;
+            const BIGNUM *esigs = NULL;
+            ECDSA_SIG_get0(esig, &esigr, &esigs);
+            SecUtils_BigNumToBuffer((BIGNUM *) esigr, &signature[0], SEC_ECC_NISTP256_KEY_LEN);
+            SecUtils_BigNumToBuffer((BIGNUM *) esigs, &signature[SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN);
+#endif
+            ECDSA_SIG_free(esig);
 
-            *signatureSize = SecSignature_GetEccSignatureSize(
-                    signatureHandle->algorithm);
+            *signatureSize = SecSignature_GetEccSignatureSize(signatureHandle->algorithm);
         }
         else
         {
@@ -2545,30 +3014,51 @@ Sec_Result SecSignature_Process(Sec_SignatureHandle* signatureHandle,
                 SEC_LOG_ERROR("SecUtils_ECCFromPubBinary failed");
                 return SEC_RESULT_FAILURE;
             }
-            ECDSA_SIG esig;
-            esig.r = BN_new();
-            esig.s = BN_new();
-            BN_bin2bn(&signature[0],
-                    SEC_ECC_NISTP256_KEY_LEN, esig.r);
-            BN_bin2bn(&signature[SEC_ECC_NISTP256_KEY_LEN],
-                    SEC_ECC_NISTP256_KEY_LEN, esig.s);
+
+            ECDSA_SIG *esig = ECDSA_SIG_new();
+            if (esig == NULL) {
+                SEC_LOG_ERROR("ECDSA_SIG_new failed");
+                SEC_ECC_FREE(ec_key);
+                return SEC_RESULT_FAILURE;
+            }
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+            BN_bin2bn(&signature[0], SEC_ECC_NISTP256_KEY_LEN, esig->r);
+            BN_bin2bn(&signature[SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN, esig->s);
+#else
+            BIGNUM *r = BN_new();
+            if (r == NULL) {
+                SEC_LOG_ERROR("BN_new failed");
+                SEC_ECC_FREE(ec_key);
+                ECDSA_SIG_free(esig);
+                return SEC_RESULT_FAILURE;                
+            }
+
+            BIGNUM *s = BN_new();
+            if (s == NULL) {
+                SEC_LOG_ERROR("BN_new failed");
+                SEC_ECC_FREE(ec_key);
+                ECDSA_SIG_free(esig);
+                BN_free(r);
+                return SEC_RESULT_FAILURE;                
+            }
+            BN_bin2bn(&signature[0], SEC_ECC_NISTP256_KEY_LEN, r);
+            BN_bin2bn(&signature[SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN, s);
+            ECDSA_SIG_set0(esig, r, s);
+#endif
             /*
              * int ECDSA_do_verify(const unsigned char *dgst,
              *         int dgst_len, const ECDSA_SIG *sig, EC_KEY* ec_key);
              * Note: sig must point to ECDSA_size(ec_key) bytes of memory
              */
-            openssl_res = ECDSA_do_verify(digest, digest_len, &esig, ec_key);
-            BN_free(esig.r);
-            BN_free(esig.s);
+            openssl_res = ECDSA_do_verify(digest, digest_len, esig, ec_key);
 
             SEC_ECC_FREE(ec_key);
+            ECDSA_SIG_free(esig);
 
             if (1 != openssl_res)
             {
                 SEC_LOG_ERROR("ECDSA_do_verify failed");
-                if (-1 == openssl_res) // -1 is not an "error", just a verification failure, so don't log as much
-                    SEC_LOG_ERROR("%s",
-                            ERR_error_string(ERR_get_error(), NULL));
                 return SEC_RESULT_VERIFICATION_FAILED;
             }
         }
@@ -2627,16 +3117,33 @@ Sec_Result SecMac_GetInstance(Sec_ProcessorHandle* secProcHandle,
     {
     case SEC_MACALGORITHM_HMAC_SHA1:
     case SEC_MACALGORITHM_HMAC_SHA256:
-        HMAC_CTX_init(&((*macHandle)->hmac_ctx));
-        HMAC_Init(&((*macHandle)->hmac_ctx), symetric_key,
-                    SecKey_GetKeyLen(key), (algorithm == SEC_MACALGORITHM_HMAC_SHA1) ? EVP_sha1() : EVP_sha256());
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+        (*macHandle)->hmac_ctx = &(*macHandle)->_hmac_ctx;
+        HMAC_CTX_init((*macHandle)->hmac_ctx);
+#else        
+        (*macHandle)->hmac_ctx = HMAC_CTX_new();
+
+        if ((*macHandle)->hmac_ctx == NULL) {
+            SEC_LOG_ERROR("HMAC_CTX_new failed");
+            goto done;
+        }
+#endif
+        HMAC_Init_ex((*macHandle)->hmac_ctx, symetric_key,
+                    SecKey_GetKeyLen(key), (algorithm == SEC_MACALGORITHM_HMAC_SHA1) ? EVP_sha1() : EVP_sha256(),
+                    NULL);
         break;
 
     case SEC_MACALGORITHM_CMAC_AES_128:
-        Comcast_CMAC_CTX_init(&((*macHandle)->cmac_ctx));
-        if (1 != Comcast_CMAC_Init(&((*macHandle)->cmac_ctx), symetric_key,
-                    SecKey_GetKeyLen(key), SecKey_GetKeyLen(key) == 16 ? EVP_aes_128_ecb() : EVP_aes_256_ecb(), NULL))
+        (*macHandle)->cmac_ctx = CMAC_CTX_new();
+        if (NULL == (*macHandle)->cmac_ctx) {
+            SEC_LOG_ERROR("CMAC_CTX_new failed");
+            goto done;
+        }
+
+        if (1 != CMAC_Init((*macHandle)->cmac_ctx, symetric_key,
+                    SecKey_GetKeyLen(key), SecKey_GetKeyLen(key) == 16 ? EVP_aes_128_cbc() : EVP_aes_256_cbc(), NULL))
         {
+            CMAC_CTX_free((*macHandle)->cmac_ctx);
             SEC_LOG_ERROR("CMAC_Init failed");
             goto done;
         }
@@ -2667,11 +3174,11 @@ Sec_Result SecMac_Update(Sec_MacHandle* macHandle, SEC_BYTE* input,
     {
     case SEC_MACALGORITHM_HMAC_SHA1:
     case SEC_MACALGORITHM_HMAC_SHA256:
-        HMAC_Update(&macHandle->hmac_ctx, input, inputSize);
+        HMAC_Update(macHandle->hmac_ctx, input, inputSize);
         break;
 
     case SEC_MACALGORITHM_CMAC_AES_128:
-        Comcast_CMAC_Update(&macHandle->cmac_ctx, input, inputSize);
+        CMAC_Update(macHandle->cmac_ctx, input, inputSize);
         break;
 
     default:
@@ -2702,12 +3209,12 @@ Sec_Result SecMac_UpdateWithKey(Sec_MacHandle* macHandle,
     {
     case SEC_MACALGORITHM_HMAC_SHA1:
     case SEC_MACALGORITHM_HMAC_SHA256:
-        HMAC_Update(&macHandle->hmac_ctx, symetric_key,
+        HMAC_Update(macHandle->hmac_ctx, symetric_key,
                 SecKey_GetKeyLen(keyHandle));
         break;
 
     case SEC_MACALGORITHM_CMAC_AES_128:
-        Comcast_CMAC_Update(&macHandle->cmac_ctx, symetric_key,
+        CMAC_Update(macHandle->cmac_ctx, symetric_key,
                 SecKey_GetKeyLen(keyHandle));
         break;
 
@@ -2726,7 +3233,8 @@ done:
 Sec_Result SecMac_Release(Sec_MacHandle* macHandle, SEC_BYTE* macBuffer,
         SEC_SIZE* macSize)
 {
-    SEC_SIZE out_len;
+    unsigned int o1;
+    size_t o2;
 
     CHECK_HANDLE(macHandle);
 
@@ -2734,14 +3242,20 @@ Sec_Result SecMac_Release(Sec_MacHandle* macHandle, SEC_BYTE* macBuffer,
     {
     case SEC_MACALGORITHM_HMAC_SHA1:
     case SEC_MACALGORITHM_HMAC_SHA256:
-        HMAC_Final(&(macHandle->hmac_ctx), macBuffer, &out_len);
-        *macSize = out_len;
-        HMAC_CTX_cleanup(&(macHandle->hmac_ctx));
+        HMAC_Final(macHandle->hmac_ctx, macBuffer, &o1);
+        *macSize = o1;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+#else
+        HMAC_CTX_free(macHandle->hmac_ctx);
+#endif
         break;
 
     case SEC_MACALGORITHM_CMAC_AES_128:
-        Comcast_CMAC_Final(&macHandle->cmac_ctx, macBuffer, &out_len);
-        *macSize = out_len;
+        CMAC_Final(macHandle->cmac_ctx, macBuffer, &o2);
+        *macSize = o2;
+
+        CMAC_CTX_free(macHandle->cmac_ctx);
         break;
 
     default:
@@ -2781,7 +3295,7 @@ Sec_Result SecRandom_Process(Sec_RandomHandle* randomHandle, SEC_BYTE* output,
         break;
 
     case SEC_RANDOMALGORITHM_PRNG:
-            CHECK_EXACT(RAND_pseudo_bytes(output, outputSize), 1, error);
+            CHECK_EXACT(RAND_bytes(output, outputSize), 1, error);
         break;
 
     default:
@@ -2970,8 +3484,7 @@ Sec_Result SecCertificate_ExtractRSAPublicKey(Sec_CertificateHandle* cert_handle
 
     if (NULL == x509)
     {
-        SEC_LOG_ERROR(
-                "Could not load X509 certificate from _Sec_CertificateData");
+        SEC_LOG_ERROR("Could not load X509 certificate from _Sec_CertificateData");
         goto error;
     }
 
@@ -2990,8 +3503,18 @@ Sec_Result SecCertificate_ExtractRSAPublicKey(Sec_CertificateHandle* cert_handle
     }
 
     Sec_Uint32ToBEBytes(RSA_size(rsa), public_key->modulus_len_be);
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SecUtils_BigNumToBuffer(rsa->n, public_key->n, Sec_BEBytesToUint32(public_key->modulus_len_be));
     SecUtils_BigNumToBuffer(rsa->e, public_key->e, 4);
+#else
+    const BIGNUM *n = NULL;
+    const BIGNUM *e = NULL;
+    RSA_get0_key(rsa, &n, &e, NULL);
+
+    SecUtils_BigNumToBuffer((BIGNUM *) n, public_key->n, Sec_BEBytesToUint32(public_key->modulus_len_be));
+    SecUtils_BigNumToBuffer((BIGNUM *) e, public_key->e, 4);
+#endif
 
     SEC_EVPPKEY_FREE(evp_key);
     SEC_RSA_FREE(rsa);
@@ -3088,6 +3611,8 @@ Sec_Result SecCertificate_Verify(Sec_CertificateHandle* certHandle,
     case SEC_KEYTYPE_RSA_1024_PUBLIC:
     case SEC_KEYTYPE_RSA_2048:
     case SEC_KEYTYPE_RSA_2048_PUBLIC:
+    case SEC_KEYTYPE_RSA_3072:
+    case SEC_KEYTYPE_RSA_3072_PUBLIC:
         if (SEC_RESULT_SUCCESS
                 != SecKey_ExtractRSAPublicKey(keyHandle, &rsaPubKey))
         {
@@ -3276,7 +3801,7 @@ Sec_Result SecKey_ExtractECCPublicKey(Sec_KeyHandle* keyHandle,
         return SEC_RESULT_FAILURE;
     }
 
-    if (SEC_RESULT_FAILURE == SecUtils_ECCToPubBinary(ec_key, public_key))
+    if (SEC_RESULT_SUCCESS != SecUtils_ECCToPubBinary(ec_key, public_key))
     {
         SEC_LOG_ERROR("SecUtils_ECCToPubBinary failed");
         SEC_ECC_FREE(ec_key);
@@ -3333,14 +3858,29 @@ Sec_Result SecKey_Generate(Sec_ProcessorHandle* secProcHandle,
 
     case SEC_KEYTYPE_RSA_1024:
     case SEC_KEYTYPE_RSA_2048:
-        rsa = RSA_generate_key(SecKey_GetKeyLenForKeyType(keyType) * 8, 65537,
-                NULL, NULL);
-        if (rsa == NULL)
-        {
-            SEC_LOG_ERROR("RSA_generate_key failed: %s",
-                    ERR_error_string(ERR_get_error(), NULL));
+    case SEC_KEYTYPE_RSA_3072:
+        rsa = RSA_new();
+        if (rsa == NULL) {
+            SEC_LOG_ERROR("RSA_new failed");
             goto done;
         }
+
+        BIGNUM *bne = BN_new();
+        if (bne == NULL) {
+            SEC_LOG_ERROR("BN_new failed");
+            goto done;
+        }
+
+        BN_set_word(bne, 65537);
+
+        if (!RSA_generate_key_ex(rsa, SecKey_GetKeyLenForKeyType(keyType) * 8, bne, NULL))
+        {
+            SEC_LOG_ERROR("RSA_generate_key_ex failed: %s", ERR_error_string(ERR_get_error(), NULL));
+            BN_free(bne);
+            goto done;
+        }
+
+        BN_free(bne);
 
         /* write private */
         SecUtils_RSAToPrivBinary(rsa, &rsaPrivKey);
@@ -3369,7 +3909,7 @@ Sec_Result SecKey_Generate(Sec_ProcessorHandle* secProcHandle,
 
         /* write private */
         /* we're using nist p256 so the length is 32 bytes */
-        if (SEC_RESULT_FAILURE == SecUtils_ECCToPrivBinary(ec_key, &ecPrivKey))
+        if (SEC_RESULT_SUCCESS != SecUtils_ECCToPrivBinary(ec_key, &ecPrivKey))
         {
             SEC_LOG_ERROR("SecUtils_ECCToPrivBinary failed");
             goto done;
@@ -3408,8 +3948,10 @@ Sec_Result SecKey_Provision(Sec_ProcessorHandle* secProcHandle,
         SEC_BYTE *data, SEC_SIZE data_len)
 {
     _Sec_KeyData key_data;
-    Sec_Result result;
+    Sec_Result result = SEC_RESULT_FAILURE;
     CHECK_HANDLE(secProcHandle);
+
+    memset(&key_data,0, sizeof(_Sec_KeyData));
 
     result = SecOpenSSL_ProcessKeyContainer(secProcHandle, &key_data, data_type, data,
             data_len, object_id);
@@ -3476,6 +4018,150 @@ Sec_Result SecKey_Delete(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID object
     return SEC_RESULT_SUCCESS;
 }
 
+static SEC_BYTE* _Sec_BuildExportAlignedBuffer( SEC_BYTE *data, SEC_SIZE dataSize, SEC_SIZE *out_bufSize)
+{
+    SEC_BYTE *retbuf = NULL;
+    *out_bufSize = AES_BLOCK_MULT(sizeof(SEC_SIZE)+dataSize);
+
+    if (NULL == (retbuf = calloc(1,*out_bufSize)))
+    {
+        SEC_LOG_ERROR("calloc failed for size %d", *out_bufSize);
+        return NULL;
+    }
+    memcpy(retbuf, &dataSize, sizeof(SEC_SIZE));
+    memcpy(retbuf + sizeof(SEC_SIZE), data, dataSize);
+
+    return retbuf;
+}
+
+Sec_Result SecKey_ExportKey(Sec_KeyHandle* keyHandle, SEC_BYTE* derivationInput,
+        SEC_BYTE* out_exportedKeyBuffer, SEC_SIZE exportedKeyBufferSize, SEC_SIZE *out_keyBytesWritten)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+    SEC_BYTE key_data[SEC_KEYCONTAINER_MAX_LEN];
+    SecUtils_KeyStoreHeader keystore_header;
+    SEC_SIZE sizeNeeded = 0;
+    SEC_BYTE encrypted_key_data[SEC_KEYCONTAINER_MAX_LEN];
+    SEC_SIZE encrypted_key_data_len = 0;
+    SEC_SIZE key_data_len  = 0;
+    _Sec_KeyInfo keyInfo;
+    _Sec_ExportedHeader expHeader;
+    SEC_BYTE *aligned_buf = NULL;
+    SEC_SIZE aligned_buf_len = 0;
+
+    *out_keyBytesWritten = 0;
+
+    memset(encrypted_key_data,0,sizeof(encrypted_key_data));
+    memset(key_data,0,sizeof(key_data));
+    memset(&keyInfo,0,sizeof(_Sec_KeyInfo));
+    memset(&keystore_header, 0, sizeof(SecUtils_KeyStoreHeader));
+    memset(&expHeader, 0, sizeof(_Sec_ExportedHeader));
+
+    if (!SecKey_IsSymetric(keyHandle->key_data.info.key_type))
+    {
+        SEC_LOG_ERROR("Only symmetric keys can be exported");
+        goto done;
+    }
+    if (keyHandle->key_data.info.kc_type != SEC_KEYCONTAINER_STORE)
+    {
+        SEC_LOG_ERROR("Only key store keys are supported on this platform");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecStore_RetrieveData(keyHandle->proc, SEC_FALSE,
+            &keystore_header, sizeof(keystore_header),
+            key_data, sizeof(key_data), &keyHandle->key_data.kc.store, keyHandle->key_data.kc_len))
+    {
+        SEC_LOG_ERROR("SecStore_RetrieveData failed");
+        goto done;
+    }
+    key_data_len = SecStore_GetDataLen(keyHandle->key_data.kc.buffer);
+    keyInfo.key_type = keyHandle->key_data.info.key_type;
+    keyInfo.kc_type = keystore_header.inner_kc_type ;
+
+    if (keystore_header.inner_kc_type == SEC_OPENSSL_KEYCONTAINER_WITH_PROPS)
+    {
+        Sec_KeyProperties *props = (Sec_KeyProperties*) key_data;
+
+        if (props->cacheable == 0x00)
+        {
+            SEC_LOG_ERROR("Key is not cacheable and cannot be exported");
+            goto done;
+        }
+    }
+
+    /* This is needed for HMAC160 key which is 20 bytes */
+    if (NULL == (aligned_buf = _Sec_BuildExportAlignedBuffer( key_data, key_data_len, &aligned_buf_len)))
+    {
+        SEC_LOG_ERROR("failed to get aligned export buffer");
+        goto done;
+    }
+
+    /* fill the export header */
+    memcpy(expHeader.derivation_input, derivationInput, SEC_AES_BLOCK_SIZE);
+
+    if (SEC_RESULT_SUCCESS != SecRandom_SingleInput(keyHandle->proc, SEC_RANDOMALGORITHM_TRUE, expHeader.iv, SEC_AES_BLOCK_SIZE)) {
+        SEC_LOG_ERROR("SecRandom_SingleInput failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecRandom_SingleInput(keyHandle->proc, SEC_RANDOMALGORITHM_TRUE, expHeader.c1, SEC_AES_BLOCK_SIZE)) {
+        SEC_LOG_ERROR("SecRandom_SingleInput failed");
+        goto done;
+    }
+
+    /* encrypt key data with local 'soc' derived key secApi spec 2.1 */
+    if (SEC_RESULT_SUCCESS
+            != _Sec_ProcessExportKeyData(keyHandle->proc, SEC_CIPHERMODE_ENCRYPT,
+                    &expHeader, aligned_buf, aligned_buf_len,
+                    encrypted_key_data, sizeof(encrypted_key_data), &encrypted_key_data_len))
+    {
+        SEC_LOG_ERROR("ProcessExportKeyData failed");
+        goto done;
+    }
+    sizeNeeded = EXPORT_KEY_HEADER_LEN + encrypted_key_data_len;
+
+    /* just the size requested ? */
+    if ( NULL == out_exportedKeyBuffer )
+    {
+        *out_keyBytesWritten = sizeNeeded;
+        result = SEC_RESULT_SUCCESS;
+        goto done;
+    }
+    if (exportedKeyBufferSize < sizeNeeded)
+    {
+        SEC_LOG_ERROR("Export buffer too small at %d, need %d",
+                exportedKeyBufferSize, sizeNeeded);
+        goto done;
+    }
+
+
+    /* build the exported key buffer
+     *
+     * |<-------------------- BUFFER ----------------------->|
+     * |<---------- HEADER ------------>|<------ DATA ------>|
+     * |_Sec_ExportHeader |_Sec_KeyInfo | encrypted key data |
+     *                                  | data size |  data  |
+     */
+    memcpy(out_exportedKeyBuffer, &expHeader, sizeof(_Sec_ExportedHeader));
+    *out_keyBytesWritten = sizeof(_Sec_ExportedHeader);
+    memcpy(out_exportedKeyBuffer + *out_keyBytesWritten, &keyInfo, sizeof(_Sec_KeyInfo));
+    *out_keyBytesWritten += sizeof(_Sec_KeyInfo);
+    memcpy(out_exportedKeyBuffer + *out_keyBytesWritten, encrypted_key_data, encrypted_key_data_len);
+    *out_keyBytesWritten += encrypted_key_data_len;
+
+    result = SEC_RESULT_SUCCESS;
+
+    done:
+
+    if (aligned_buf)
+        free(aligned_buf);
+
+    Sec_Memset(key_data, 0, sizeof(key_data));
+
+    return result;
+}
+
 Sec_Result SecKey_Release(Sec_KeyHandle* keyHandle)
 {
     CHECK_HANDLE(keyHandle);
@@ -3502,155 +4188,243 @@ Sec_KeyType _Sec_GetOutputMacKeyType(Sec_MacAlgorithm alg)
     return SEC_KEYTYPE_NUM;
 }
 
+
+/* post 1.1.0 openssl implementation
+int _HKDF(SEC_BYTE *out_key, SEC_SIZE out_key_len, SEC_BYTE *secret, SEC_SIZE secret_len, SEC_BYTE *salt, SEC_SIZE salt_len, SEC_BYTE *info, SEC_SIZE info_len) {
+    int res = 0;
+
+    EVP_PKEY_CTX *pctx = NULL;
+
+    pctx = EVP_PKEY_CTX_new_id(EVP_PKEY_HKDF, NULL);
+    if (pctx == NULL) {
+        SEC_LOG_ERROR("EVP_PKEY_CTX_new_id failed");
+        goto done;
+    }
+
+    if (EVP_PKEY_derive_init(pctx) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_derive_init failed");
+        goto done;
+    }
+
+    if (EVP_PKEY_CTX_set_hkdf_md(pctx, EVP_sha256()) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_CTX_set_hkdf_md failed");
+        goto done;
+    }
+
+    if (EVP_PKEY_CTX_set1_hkdf_salt(pctx, salt, salt_len) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_CTX_set1_salt failed");
+        goto done;
+    }
+
+    if (EVP_PKEY_CTX_set1_hkdf_key(pctx, secret, secret_len) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_CTX_set1_key failed");
+        goto done;
+    }
+
+    if (EVP_PKEY_CTX_add1_hkdf_info(pctx, info, info_len) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_CTX_add1_hkdf_info failed");
+        goto done;
+    }
+
+    size_t keylen = out_key_len;
+    if (EVP_PKEY_derive(pctx, out_key, &keylen) <= 0) {
+        SEC_LOG_ERROR("EVP_PKEY_derive failed");
+        goto done;
+    }
+
+    res = 1;
+
+done:
+    if (pctx != NULL) {
+        EVP_PKEY_CTX_free(pctx);
+    }
+
+    return res;
+}
+*/
+
+static int _HKDF(SEC_BYTE *out_key, SEC_SIZE out_key_len, SEC_BYTE *secret, SEC_SIZE secret_len, SEC_BYTE *salt, SEC_SIZE salt_len, SEC_BYTE *info, SEC_SIZE info_len, Sec_MacAlgorithm macAlg) {
+    /* Extract */
+    const EVP_MD *evp_md = NULL;
+
+    switch (macAlg) {
+        case SEC_MACALGORITHM_HMAC_SHA1:
+            evp_md = EVP_sha1();
+            break;
+
+        case SEC_MACALGORITHM_HMAC_SHA256:
+            evp_md = EVP_sha256();
+            break;
+
+        default:
+            SEC_LOG_ERROR("Unknown macAlg encountered:%d", macAlg);
+            return 0;
+            break;
+    }
+
+    SEC_BYTE prk[SEC_MAC_MAX_LEN];
+    SEC_SIZE prk_len;
+
+    if (NULL == HMAC(evp_md, secret, secret_len, salt, salt_len, prk, &prk_len)) {
+        SEC_LOG_ERROR("HMAC failed");
+        return 0;
+    }
+
+    /* Expand */
+    SEC_SIZE digest_length = SecDigest_GetDigestLenForAlgorithm(SecMac_GetDigestAlgorithm(macAlg));
+    int r = out_key_len / digest_length + ((out_key_len % digest_length == 0) ? 0 : 1);
+    int i;
+
+    SEC_BYTE t[SEC_MAC_MAX_LEN];
+    unsigned int t_len = 0;
+
+    for (i = 1; i <= r; i++)
+    {
+        SEC_BYTE loop = i;
+        SEC_SIZE cp_len;
+
+        if (i == r)
+            cp_len = out_key_len % digest_length;
+        else
+            cp_len = digest_length;
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+        HMAC_CTX _ctx;
+        HMAC_CTX *ctx = &_ctx;
+        HMAC_CTX_init(ctx);
+#else
+        HMAC_CTX *ctx = HMAC_CTX_new();
+        if (ctx == NULL) {
+            SEC_LOG_ERROR("HMAC_CTX_new failed");
+            goto error;
+        }
+#endif
+        if (1 != HMAC_Init_ex(ctx, prk, prk_len, (macAlg == SEC_MACALGORITHM_HMAC_SHA1) ? EVP_sha1() : EVP_sha256(), NULL)) {
+            SEC_LOG_ERROR("HMAC_Init_ex failed");
+            goto error;
+        }
+
+        if (t_len > 0 && 1 != HMAC_Update(ctx, t, t_len)) {
+            SEC_LOG_ERROR("HMAC_Update failed");
+            goto error;
+        }
+
+        if (1 != HMAC_Update(ctx, info, info_len)) {
+            SEC_LOG_ERROR("HMAC_Update failed");
+            goto error;
+        }
+
+        if (1 != HMAC_Update(ctx, &loop, 1)) {
+            SEC_LOG_ERROR("HMAC_Update failed");
+            goto error;
+        }
+
+        if (1 != HMAC_Final(ctx, t, &t_len)) {
+            SEC_LOG_ERROR("HMAC_Final failed");
+            goto error;
+        }
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+#else
+        HMAC_CTX_free(ctx);
+#endif
+        ctx = NULL;
+
+        memcpy(out_key + (i - 1) * digest_length, t, cp_len);
+        continue;
+
+    error:
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+#else
+        if (ctx != NULL) {
+            HMAC_CTX_free(ctx);
+        }
+#endif
+
+        Sec_Memset(prk, 0, sizeof(prk));
+        Sec_Memset(t, 0, sizeof(t));
+
+        return 0;
+    }
+
+    Sec_Memset(prk, 0, sizeof(prk));
+    Sec_Memset(t, 0, sizeof(t));
+
+    return 1;
+}
+
 Sec_Result SecKey_Derive_HKDF(Sec_ProcessorHandle* secProcHandle,
         SEC_OBJECTID object_id_derived, Sec_KeyType type_derived,
         Sec_StorageLoc loc_derived, Sec_MacAlgorithm macAlgorithm,
         SEC_BYTE *nonce,
         SEC_BYTE *salt, SEC_SIZE saltSize, SEC_BYTE *info, SEC_SIZE infoSize)
 {
-    int r, i;
-    SEC_SIZE key_length;
-    SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
-    SEC_SIZE digest_length;
-    SEC_BYTE prk[SEC_MAC_MAX_LEN];
-    SEC_SIZE prk_len;
-    SEC_BYTE t[SEC_MAC_MAX_LEN];
-    SEC_SIZE t_len = 0;
-    SEC_SIZE cp_len;
-    Sec_KeyHandle *prk_key = NULL;
-    Sec_MacHandle *mac_handle = NULL;
-    SEC_BYTE loop;
-    SEC_OBJECTID temp_key_id = SEC_OBJECTID_INVALID;
-
-    if (!SecKey_IsSymetric(type_derived)) {
-        SEC_LOG_ERROR("Only symetric keys can be derived");
-        return SEC_RESULT_INVALID_PARAMETERS;
-    }
-
-    /* provision base key */
-    CHECK_EXACT(_Sec_ProvisionBaseKey(secProcHandle, nonce), SEC_RESULT_SUCCESS, error);
-
-    key_length = SecKey_GetKeyLenForKeyType(type_derived);
-    digest_length = SecDigest_GetDigestLenForAlgorithm(
-            SecMac_GetDigestAlgorithm(macAlgorithm));
-
-    /* Extract */
-    CHECK_EXACT(
-            SecMac_SingleInputId(secProcHandle, macAlgorithm, SEC_OBJECTID_BASE_KEY_MAC, salt, saltSize, prk, &prk_len),
-            SEC_RESULT_SUCCESS, error);
-
-    temp_key_id = SEC_OBJECTID_OPENSSL_DERIVE_TMP;
-    CHECK_EXACT(
-            SecKey_Provision(secProcHandle, temp_key_id, SEC_STORAGELOC_RAM_SOFT_WRAPPED, SecKey_GetClearContainer( _Sec_GetOutputMacKeyType(macAlgorithm)), prk, prk_len),
-            SEC_RESULT_SUCCESS, error);
-
-    CHECK_EXACT(
-            SecKey_GetInstance(secProcHandle, temp_key_id, &prk_key),
-            SEC_RESULT_SUCCESS, error);
-
-    /* Expand */
-    r = key_length / digest_length
-            + ((key_length % digest_length == 0) ? 0 : 1);
-
-    for (i = 1; i <= r; i++)
-    {
-        loop = i;
-
-        if (i == r)
-            cp_len = key_length % digest_length;
-        else
-            cp_len = digest_length;
-
-        if (SEC_RESULT_SUCCESS
-                != SecMac_GetInstance(secProcHandle, macAlgorithm, prk_key,
-                        &mac_handle))
-            goto error;
-
-        if (t_len > 0
-                && SEC_RESULT_SUCCESS != SecMac_Update(mac_handle, t, t_len))
-            goto error;
-
-        if (SEC_RESULT_SUCCESS != SecMac_Update(mac_handle, info, infoSize))
-            goto error;
-
-        if (SEC_RESULT_SUCCESS != SecMac_Update(mac_handle, &loop, 1))
-            goto error;
-
-        if (SEC_RESULT_SUCCESS != SecMac_Release(mac_handle, t, &t_len))
-        {
-            mac_handle = NULL;
-            goto error;
-        }
-
-        memcpy(out_key + (i - 1) * digest_length, t, cp_len);
-    }
-
-    SecKey_Release(prk_key);
-    prk_key = NULL;
-    SecKey_Delete(secProcHandle, temp_key_id);
-
-    /* store key */
-    CHECK_EXACT(
-            SecKey_Provision(secProcHandle, object_id_derived, loc_derived, SecKey_GetClearContainer(type_derived), out_key, key_length),
-            SEC_RESULT_SUCCESS, error);
-
-    Sec_Memset(out_key, 0, sizeof(out_key));
-    Sec_Memset(prk, 0, sizeof(prk));
-    Sec_Memset(t, 0, sizeof(t));
-
-    return SEC_RESULT_SUCCESS;
-
-error:
-    if (mac_handle != NULL )
-        SecMac_Release(mac_handle, t, &t_len);
-    if (prk_key != NULL)
-        SecKey_Release(prk_key);
-
-    SecKey_Delete(secProcHandle, temp_key_id);
-
-    Sec_Memset(out_key, 0, sizeof(out_key));
-    Sec_Memset(prk, 0, sizeof(prk));
-    Sec_Memset(t, 0, sizeof(t));
-
-    return SEC_RESULT_FAILURE;
-}
-
-Sec_Result SecKey_Derive_ConcatKDF(Sec_ProcessorHandle* secProcHandle,
-        SEC_OBJECTID object_id_derived, Sec_KeyType type_derived,
-        Sec_StorageLoc loc_derived, Sec_DigestAlgorithm digestAlgorithm,
-        SEC_BYTE *nonce,
-        SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize)
-{
-    int i;
-    SEC_BYTE loop[] =
-    { 0, 0, 0, 0 };
-    SEC_BYTE hash[SEC_DIGEST_MAX_LEN];
-    SEC_SIZE key_length;
-    SEC_SIZE digest_length;
-    int r;
-    Sec_KeyHandle *base_key = NULL;
-    Sec_DigestHandle *digestHandle = NULL;
-    SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
-    Sec_Result res = SEC_RESULT_FAILURE;
-
     if (!SecKey_IsSymetric(type_derived))
     {
         SEC_LOG_ERROR("Can only derive symetric keys");
         return SEC_RESULT_INVALID_PARAMETERS;
     }
 
-    /* provision base key */
-    CHECK_EXACT(_Sec_ProvisionBaseKey(secProcHandle, nonce), SEC_RESULT_SUCCESS,
-            done);
+    Sec_Result res = SEC_RESULT_FAILURE;
+    SEC_BYTE secret[16];
 
-    key_length = SecKey_GetKeyLenForKeyType(type_derived);
+    SEC_OBJECTID idDerived = SecKey_ObtainFreeObjectId(secProcHandle, SEC_OBJECTID_RESERVED_BASE, SEC_OBJECTID_RESERVED_TOP);
+    if (idDerived == SEC_OBJECTID_INVALID) {
+        SEC_LOG_ERROR("SecKey_ObtainFreeObjectId failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Derive_BaseKey(secProcHandle, idDerived, SEC_STORAGELOC_RAM, nonce)) {
+        SEC_LOG_ERROR("SecKey_Derive_BaseKey failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyId(secProcHandle, idDerived, secret, sizeof(secret))) {
+        SEC_LOG_ERROR("_Sec_SymetricFromKeyId failed");
+        goto done;
+    }
+
+    SEC_BYTE out_key[SEC_KEYCONTAINER_MAX_LEN];
+    SEC_BYTE out_key_len = SecKey_GetKeyLenForKeyType(type_derived);
+    if (1 != _HKDF(out_key, out_key_len, secret, sizeof(secret), salt, saltSize, info, infoSize, macAlgorithm)) {
+        SEC_LOG_ERROR("_HKDF failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle, object_id_derived, loc_derived, SecKey_GetClearContainer(type_derived), out_key, out_key_len)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    Sec_Memset(out_key, 0, sizeof(out_key));
+    Sec_Memset(secret, 0, sizeof(secret));
+
+    if (idDerived != SEC_OBJECTID_INVALID) {
+        SecKey_Delete(secProcHandle, idDerived);
+    }
+
+    return res;
+}
+
+static Sec_Result _ConcatKDF(Sec_ProcessorHandle* secProcHandle,
+        SEC_BYTE *z, SEC_SIZE z_len,
+        SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize,
+        Sec_DigestAlgorithm digestAlgorithm,
+        SEC_BYTE *out_key, SEC_SIZE out_key_length)
+{
+    int i;
+    SEC_BYTE loop[] = { 0, 0, 0, 0 };
+    SEC_BYTE hash[SEC_DIGEST_MAX_LEN];
+    SEC_SIZE digest_length;
+    int r;
+    Sec_DigestHandle *digestHandle = NULL;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
     digest_length = SecDigest_GetDigestLenForAlgorithm(digestAlgorithm);
-    r = key_length / digest_length
-            + ((key_length % digest_length == 0) ? 0 : 1);
-
-    CHECK_EXACT(
-            SecKey_GetInstance(secProcHandle, SEC_OBJECTID_BASE_KEY_AES, &base_key),
-            SEC_RESULT_SUCCESS, done);
+    r = out_key_length / digest_length + ((out_key_length % digest_length == 0) ? 0 : 1);
 
     for (i = 1; i <= r; ++i)
     {
@@ -3661,46 +4435,89 @@ Sec_Result SecKey_Derive_ConcatKDF(Sec_ProcessorHandle* secProcHandle,
                 SEC_RESULT_SUCCESS, done);
         CHECK_EXACT(SecDigest_Update(digestHandle, loop, sizeof(loop)),
                 SEC_RESULT_SUCCESS, done);
-        CHECK_EXACT(SecDigest_UpdateWithKey(digestHandle, base_key),
+        CHECK_EXACT(SecDigest_Update(digestHandle, z, z_len),
                 SEC_RESULT_SUCCESS, done);
         CHECK_EXACT(
                 SecDigest_Update(digestHandle, otherInfo, otherInfoSize),
                 SEC_RESULT_SUCCESS, done);
 
-        if (SEC_RESULT_SUCCESS != SecDigest_Release(digestHandle, hash, &digest_length))
-        {
+        if (SEC_RESULT_SUCCESS != SecDigest_Release(digestHandle, hash, &digest_length)) {
             SEC_LOG_ERROR("SecDigest_Release failed");
             digestHandle = NULL;
             goto done;
         }
         digestHandle = NULL;
 
-        if (i < r || (key_length % digest_length == 0))
-        {
-            memcpy(out_key + digest_length * (i - 1), hash,
-                    digest_length);
-        }
-        else
-        {
-            memcpy(out_key + digest_length * (i - 1), hash,
-                    key_length % digest_length);
+        if (i < r || (out_key_length % digest_length == 0)) {
+            memcpy(out_key + digest_length * (i - 1), hash, digest_length);
+        } else {
+            memcpy(out_key + digest_length * (i - 1), hash, out_key_length % digest_length);
         }
     }
 
-    /* store key */
-    CHECK_EXACT(
-            SecKey_Provision(secProcHandle, object_id_derived, loc_derived, SecKey_GetClearContainer(type_derived), out_key, key_length),
-            SEC_RESULT_SUCCESS, done);
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    if (digestHandle != NULL)
+        SecDigest_Release(digestHandle, hash, &digest_length);
+
+    return res;
+}
+
+Sec_Result SecKey_Derive_ConcatKDF(Sec_ProcessorHandle* secProcHandle,
+        SEC_OBJECTID object_id_derived, Sec_KeyType type_derived,
+        Sec_StorageLoc loc_derived, Sec_DigestAlgorithm digestAlgorithm,
+        SEC_BYTE *nonce,
+        SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize)
+{
+    if (!SecKey_IsSymetric(type_derived))
+    {
+        SEC_LOG_ERROR("Can only derive symetric keys");
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
+
+    Sec_Result res = SEC_RESULT_FAILURE;
+    SEC_BYTE secret[16];
+
+    SEC_OBJECTID idDerived = SecKey_ObtainFreeObjectId(secProcHandle, SEC_OBJECTID_RESERVED_BASE, SEC_OBJECTID_RESERVED_TOP);
+    if (idDerived == SEC_OBJECTID_INVALID) {
+        SEC_LOG_ERROR("SecKey_ObtainFreeObjectId failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Derive_BaseKey(secProcHandle, idDerived, SEC_STORAGELOC_RAM, nonce)) {
+        SEC_LOG_ERROR("SecKey_Derive_BaseKey failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyId(secProcHandle, idDerived, secret, sizeof(secret))) {
+        SEC_LOG_ERROR("_Sec_SymetricFromKeyId failed");
+        goto done;
+    }
+
+    SEC_BYTE out_key[SEC_KEYCONTAINER_MAX_LEN];
+    SEC_BYTE out_key_length = SecKey_GetKeyLenForKeyType(type_derived);
+    if (SEC_RESULT_SUCCESS != _ConcatKDF(secProcHandle,
+            secret, sizeof(secret),
+            otherInfo, otherInfoSize,
+            digestAlgorithm,
+            out_key, out_key_length)) {
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle, object_id_derived, loc_derived, SecKey_GetClearContainer(type_derived), out_key, out_key_length)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        goto done;
+    }
 
     res = SEC_RESULT_SUCCESS;
 
 done:
     Sec_Memset(out_key, 0, sizeof(out_key));
-    if (base_key != NULL)
-        SecKey_Release(base_key);
+    Sec_Memset(secret, 0, sizeof(secret));
 
-    if (digestHandle != NULL)
-        SecDigest_Release(digestHandle, hash, &digest_length);
+    if (idDerived != SEC_OBJECTID_INVALID) {
+        SecKey_Delete(secProcHandle, idDerived);
+    }
 
     return res;
 }
@@ -3715,8 +4532,7 @@ Sec_Result SecKey_Derive_PBEKDF(Sec_ProcessorHandle* secProcHandle,
     SEC_SIZE key_length;
     SEC_SIZE digest_length;
     SEC_SIZE i, j, k, l;
-    SEC_BYTE loop[] =
-    { 0, 0, 0, 0 };
+    SEC_BYTE loop[] = { 0, 0, 0, 0 };
     SEC_BYTE mac1[SEC_MAC_MAX_LEN];
     SEC_BYTE mac2[SEC_MAC_MAX_LEN];
     SEC_BYTE out[SEC_MAC_MAX_LEN];
@@ -3752,10 +4568,12 @@ Sec_Result SecKey_Derive_PBEKDF(Sec_ProcessorHandle* secProcHandle,
     {
         loop[3] = i;
 
-        if (i == l)
+        if (i == l) {
             cp_len = key_length % digest_length;
-        else
+        }
+        else {
             cp_len = digest_length;
+        }
 
         if (SEC_RESULT_SUCCESS
                 != SecMac_GetInstance(secProcHandle, macAlgorithm, base_key,
@@ -3884,19 +4702,6 @@ Sec_Result SecKey_Derive_KeyLadderAes128(Sec_ProcessorHandle* secProcHandle,
     return SEC_RESULT_FAILURE;
 }
 
-static void incCounter(SEC_BYTE *counter, SEC_SIZE counterSize) {
-    int idx = counterSize-1;
-    SEC_BOOL carry = 1;
-
-    while (carry > 0 && idx >= 0) {
-        if (counter[idx--]++ == 0x00) {
-            carry = 1;
-        } else {
-            carry = 0;
-        }
-    }
-}
-
 Sec_Result SecKey_Derive_CMAC_AES128(
     Sec_ProcessorHandle* secProcHandle,
     SEC_OBJECTID idDerived,
@@ -3908,11 +4713,9 @@ Sec_Result SecKey_Derive_CMAC_AES128(
     SEC_BYTE *counter,
     SEC_SIZE counterSize)
 {
-    int i;
-    SEC_BYTE hash[SEC_DIGEST_MAX_LEN];
+    SEC_BYTE full_key[16*4];
     SEC_SIZE key_length;
     SEC_SIZE mac_length = 16;
-    int r;
     Sec_KeyHandle *base_key = NULL;
     Sec_MacHandle *macHandle = NULL;
     SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
@@ -3923,31 +4726,46 @@ Sec_Result SecKey_Derive_CMAC_AES128(
         return SEC_RESULT_INVALID_PARAMETERS;
     }
 
+    if (counterSize != 1) {
+        SEC_LOG_ERROR("Only 1 byte counter is supported");
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
+
+    if (*counter < 1 || *counter > 4) {
+        SEC_LOG_ERROR("Invalid counter passed in: %d", *counter);
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
+
     key_length = SecKey_GetKeyLenForKeyType(typeDerived);
 
     if ((key_length % mac_length) != 0) {
         SEC_LOG_ERROR("Key length %d has to be a multiple of 16.", key_length);
         return SEC_RESULT_INVALID_PARAMETERS;
     }
-    r = key_length / mac_length;
+
+    if ((key_length/16) > (5 - *counter)) {
+        SEC_LOG_ERROR("key_length %d and counter %d are not compatible", key_length, *counter);
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
 
     CHECK_EXACT(SecKey_GetInstance(secProcHandle, derivationKey, &base_key), SEC_RESULT_SUCCESS, done);
 
-    for (i = 1; i <= r; ++i) {
+    SEC_BYTE i;
+    for (i = 1; i <= 4; ++i) {
         CHECK_EXACT(SecMac_GetInstance(secProcHandle, SEC_MACALGORITHM_CMAC_AES_128, base_key, &macHandle), SEC_RESULT_SUCCESS, done);
-        CHECK_EXACT(SecMac_Update(macHandle, counter, counterSize), SEC_RESULT_SUCCESS, done);
+        CHECK_EXACT(SecMac_Update(macHandle, &i, 1), SEC_RESULT_SUCCESS, done);
         CHECK_EXACT(SecMac_Update(macHandle, otherData, otherDataSize), SEC_RESULT_SUCCESS, done);
-        incCounter(counter, counterSize);
 
-        if (SEC_RESULT_SUCCESS != SecMac_Release(macHandle, hash, &mac_length)) {
+        if (SEC_RESULT_SUCCESS != SecMac_Release(macHandle, full_key + (i-1)*mac_length, &mac_length)) {
             SEC_LOG_ERROR("SecMac_Release failed");
             macHandle = NULL;
             goto done;
         }
         macHandle = NULL;
-
-        memcpy(out_key + mac_length * (i - 1), hash, mac_length);
     }
+
+    //slice
+    memcpy(out_key, full_key + ((*counter - 1) * 16), key_length);
 
     /* store key */
     CHECK_EXACT(
@@ -3962,7 +4780,7 @@ done:
         SecKey_Release(base_key);
 
     if (macHandle != NULL)
-        SecMac_Release(macHandle, hash, &mac_length);
+        SecMac_Release(macHandle, full_key, &key_length);
 
     return res;
 }
@@ -3978,6 +4796,8 @@ Sec_KeyType SecKey_GetKeyType(Sec_KeyHandle* keyHandle)
 Sec_KeyType SecCertificate_GetKeyType(Sec_CertificateHandle* certHandle)
 {
     int algonid;
+    int length;
+
     X509 *x509 = SecCertificate_ToX509(certHandle);
 
     if (x509 == NULL)
@@ -3986,30 +4806,40 @@ Sec_KeyType SecCertificate_GetKeyType(Sec_CertificateHandle* certHandle)
         return SEC_KEYTYPE_NUM;
     }
 
-    algonid = OBJ_obj2nid(x509->cert_info->key->algor->algorithm);
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    algonid = OBJ_obj2nid(x509->cert_info->key->algor->algorithm);
+#else
+    algonid = X509_get_signature_nid(x509);
+#endif
+
+    EVP_PKEY *pkey = NULL;
+    if ((pkey = X509_get_pubkey(x509)) == NULL) {
+        SEC_X509_FREE(x509);
+        SEC_LOG_ERROR("X509_get_pubkey failed");
+        return SEC_KEYTYPE_NUM;
+    }
+    length = EVP_PKEY_bits(pkey)/8;
+    SEC_EVPPKEY_FREE(pkey);
     SEC_X509_FREE(x509);
 
     switch (algonid)
     {
     case NID_rsaEncryption:
-        return SEC_KEYTYPE_RSA_2048_PUBLIC;
+        if (length == 128) {
+            return SEC_KEYTYPE_RSA_1024_PUBLIC;
+        } else if (length == 256) {
+            return SEC_KEYTYPE_RSA_2048_PUBLIC;
+        } else if (length == 384) {
+            return SEC_KEYTYPE_RSA_3072_PUBLIC;
+        } else {
+            SEC_LOG_ERROR("Unexpected key length encountered: %d", length);
+            return SEC_KEYTYPE_NUM;
+        }
     case NID_X9_62_id_ecPublicKey:
-        return SEC_KEYTYPE_ECC_NISTP256; // also used for SEC_KEYTYPE_ECC_NISTP256_PUBLIC
-    case NID_secp256k1:                       // not actually used
         return SEC_KEYTYPE_ECC_NISTP256;
-        //$$$ Note the other key type values defined in the header file do not have
-        // a corresponding algonid NID. See OpenSSL include file obj_mac.h for
-        // the NID values.
-        // Here are the other values if we find a corresponding algonid value for them:
-        // case NID_???:                return SEC_KEYTYPE_AES_128;
-        // case NID_???:                return SEC_KEYTYPE_AES_256;
-        // case NID_???:                return SEC_KEYTYPE_HMAC_128;
-        // case NID_???:                return SEC_KEYTYPE_HMAC_160;
-        // case NID_???:                return SEC_KEYTYPE_HMAC_256;
-        // case NID_???:                return SEC_KEYTYPE_RSA_1024;
-        // case NID_???:                return SEC_KEYTYPE_RSA_1024_PUBLIC;
-        // case NID_???:                return SEC_KEYTYPE_RSA_2048;
+    case NID_secp256k1:
+        return SEC_KEYTYPE_ECC_NISTP256;
 
     default:
         SEC_LOG_ERROR("Could not find key type for algorithm %d", algonid);
@@ -4106,6 +4936,7 @@ Sec_ProcessorHandle* SecKey_GetProcessor(Sec_KeyHandle* key)
 Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
         Sec_ECCRawPublicKey* otherPublicKey, Sec_KeyType type_derived,
         SEC_OBJECTID id_derived, Sec_StorageLoc loc_derived,
+        Sec_Kdf kdf,
         Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *otherInfo,
         SEC_SIZE otherInfoSize)
 {
@@ -4118,6 +4949,11 @@ Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
     BIGNUM *b2 = BN_new();
     Sec_DigestHandle *digestHandle = NULL;
     Sec_KeyHandle *base_key = NULL;
+
+    if (kdf != SEC_KDF_CONCAT) {
+        SEC_LOG_ERROR("Invalid kdf parameter encountered: %d", kdf);
+        return SEC_RESULT_INVALID_PARAMETERS;
+    }
 
     if (otherPublicKey->type != SEC_KEYTYPE_ECC_NISTP256_PUBLIC &&
             otherPublicKey->type != SEC_KEYTYPE_ECC_NISTP256)
@@ -4156,16 +4992,6 @@ Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
     // It is the shared secret value
     if (!EC_POINT_get_affine_coordinates_GF2m(group, shared_secret, b1, NULL, ctx))
         goto done;
-
-#ifdef DEBUG_EC
-    // $$$ debug code: print out the points
-    char *point_str = EC_POINT_point2hex(group, other_ecpoint, POINT_CONVERSION_UNCOMPRESSED, ctx);
-    SEC_PRINT("other_ecpoint %s\n", point_str);
-    free(point_str);
-    point_str = EC_POINT_point2hex(group, shared_secret, POINT_CONVERSION_UNCOMPRESSED, ctx);
-    SEC_PRINT("shared_secret %s\n", point_str);
-    free(point_str);
-#endif
 
     // convert the shared secret to an array and then provision it as an AES 256 bit key
     unsigned char x_coord_as_array[SEC_ECC_NISTP256_KEY_LEN];
@@ -4241,12 +5067,6 @@ Sec_Result SecKey_ECDHKeyAgreementWithKDF(Sec_KeyHandle *keyHandle,
                 SEC_RESULT_SUCCESS, done);
 
     res = SEC_RESULT_SUCCESS;
-#ifdef DEBUG_EC
-    // $$$ debugging
-    SEC_PRINT("Final shared key: ");
-    Sec_PrintHex((unsigned char *)out_key, key_length);
-    SEC_PRINT("\n");
-#endif
 
   done:
     Sec_Memset(out_key, 0, sizeof(out_key));
@@ -4413,6 +5233,780 @@ Sec_Result SecBundle_Release(Sec_BundleHandle* bundleHandle)
     CHECK_HANDLE(bundleHandle);
 
     SEC_FREE(bundleHandle);
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKey_GetProperties(Sec_KeyHandle *keyHandle, Sec_KeyProperties *keyProps)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+    SecUtils_KeyStoreHeader keystore_header;
+    SEC_BYTE key_data[SEC_KEYCONTAINER_MAX_LEN];
+
+    memset(&keystore_header,0,sizeof(SecUtils_KeyStoreHeader));
+    memset(key_data, 0, sizeof(key_data));
+
+    if (SEC_RESULT_SUCCESS != SecStore_RetrieveData(keyHandle->proc, SEC_FALSE,
+            &keystore_header, sizeof(SecUtils_KeyStoreHeader),
+            key_data, sizeof(key_data), &keyHandle->key_data.kc.store, keyHandle->key_data.kc_len))
+    {
+        SEC_LOG_ERROR("SecStore_RetrieveData failed");
+        goto done;
+    }
+
+    memset(keyProps,0,sizeof(Sec_KeyProperties));
+    if (keystore_header.inner_kc_type == SEC_OPENSSL_KEYCONTAINER_WITH_PROPS)
+    {
+        Sec_KeyProperties *_props = (Sec_KeyProperties*)key_data;
+        memcpy(keyProps, _props, sizeof(Sec_KeyProperties) );
+    }
+    else
+    {
+        /* defaults */
+        SecKeyCtrl_SetDefaultKeyProperties(keyProps, keyHandle->key_data.info.key_type,
+                SecKey_GetKeyLen(keyHandle));
+    }
+
+    result = SEC_RESULT_SUCCESS;
+
+    done:
+
+    return result;
+}
+
+
+/* opaque buffer for 2.1 intel pace xg1. Should NOT be externally exposed */
+typedef struct Sec_OpaqueBufferHandle_struct
+{
+    SEC_BYTE *dataBuf;
+    SEC_SIZE dataBufSize;
+} Sec_OpaqueBufferHandle;
+
+Sec_Result Sec_OpaqueBufferMalloc(SEC_SIZE bufLength, void **handle, void *params)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+    Sec_OpaqueBufferHandle *opaqueBuf = NULL;
+
+    if (0 == bufLength)
+    {
+        SEC_LOG_ERROR("Argument `length' has value of 0");
+        goto done;
+    }
+    if (NULL == handle)
+    {
+        SEC_LOG_ERROR("Argument `handle' has value of null");
+        goto done;
+    }
+
+    opaqueBuf = (Sec_OpaqueBufferHandle*)malloc(sizeof(Sec_OpaqueBufferHandle));
+    if (NULL == opaqueBuf)
+    {
+       SEC_LOG_ERROR("malloc failed");
+       goto done;
+    }
+    opaqueBuf->dataBuf = malloc(bufLength);
+    if (NULL == opaqueBuf->dataBuf)
+    {
+        SEC_LOG_ERROR("malloc failed");
+        free(opaqueBuf);
+        goto done;
+    }
+    opaqueBuf->dataBufSize = bufLength;
+
+    *handle = opaqueBuf;
+
+    result = SEC_RESULT_SUCCESS;
+
+    done:
+
+    return result;
+}
+
+Sec_Result Sec_OpaqueBufferWrite(void *handle, SEC_SIZE offset, void *data, SEC_SIZE length)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+    Sec_OpaqueBufferHandle *opaqueBuf = (Sec_OpaqueBufferHandle*)handle;
+
+    if (NULL == opaqueBuf)
+    {
+        SEC_LOG_ERROR("Argument `handle' has value of null");
+        goto done;
+    }
+    if (NULL == data)
+    {
+        SEC_LOG_ERROR("Argument `data' has value of null");
+        goto done;
+    }
+    if (0 == length)
+    {
+        SEC_LOG_ERROR("Argument `length' has value of 0");
+        goto done;
+    }
+
+    /* overflow check */
+    if (offset + length > opaqueBuf->dataBufSize)
+    {
+        SEC_LOG_ERROR("attempt to write beyond opaque buffer boundary");
+        goto done;
+    }
+
+    memcpy(opaqueBuf->dataBuf + offset, data, length);
+
+    result = SEC_RESULT_SUCCESS;
+
+done:
+    return result;
+}
+
+Sec_Result Sec_OpaqueBufferFree(void *handle, void *params)
+{
+    Sec_OpaqueBufferHandle *opaqueBuf = (Sec_OpaqueBufferHandle*)handle;
+
+    if (opaqueBuf)
+    {
+        if (NULL != opaqueBuf->dataBuf)
+        {
+            free(opaqueBuf->dataBuf);
+        }
+        free(opaqueBuf);
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecCodeIntegrity_SecureBootEnabled(void)
+{
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecSVP_SetTime(time_t time) {
+    if (0 != stime(&time)) {
+        SEC_LOG_ERROR("stime failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecCipher_ProcessOpaque(Sec_CipherHandle* cipherHandle,
+        void* inputHandle, void* outputHandle, SEC_BOOL lastInput,
+        SEC_SIZE *bytesWritten)
+{
+    Sec_Result result = SEC_RESULT_FAILURE;
+    Sec_OpaqueBufferHandle *in_opaqueHandle = (Sec_OpaqueBufferHandle*)inputHandle;
+    Sec_OpaqueBufferHandle *out_opaqueHandle = (Sec_OpaqueBufferHandle*)outputHandle;
+
+    if (NULL == in_opaqueHandle)
+    {
+        SEC_LOG_ERROR("Argument `inputHandle' has value of null");
+        goto done;
+    }
+    if (NULL == out_opaqueHandle)
+    {
+        SEC_LOG_ERROR("Argument `outputHandle' has value of null");
+        goto done;
+    }
+
+    result = SecCipher_Process(cipherHandle, in_opaqueHandle->dataBuf,
+            in_opaqueHandle->dataBufSize, lastInput, out_opaqueHandle->dataBuf,
+            out_opaqueHandle->dataBufSize, bytesWritten);
+    if (SEC_RESULT_SUCCESS != result) {
+        SEC_LOG_ERROR("SecCipher_Process failed");
+    }
+
+done:
+    return result;
+}
+
+Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, void* inputHandle, void* outputHandle, SEC_SIZE *bytesWritten, SEC_SIZE dataShift) {
+    Sec_Result result = SEC_RESULT_FAILURE;
+    Sec_OpaqueBufferHandle *in_opaqueHandle = (Sec_OpaqueBufferHandle*)inputHandle;
+    Sec_OpaqueBufferHandle *out_opaqueHandle = (Sec_OpaqueBufferHandle*)outputHandle;
+
+    if (NULL == in_opaqueHandle)
+    {
+        SEC_LOG_ERROR("Argument `inputHandle' has value of null");
+        goto done;
+    }
+    if (NULL == out_opaqueHandle)
+    {
+        SEC_LOG_ERROR("Argument `outputHandle' has value of null");
+        goto done;
+    }
+
+    result = SecCipher_ProcessCtrWithDataShift(cipherHandle, in_opaqueHandle->dataBuf, in_opaqueHandle->dataBufSize, out_opaqueHandle->dataBuf, out_opaqueHandle->dataBufSize, bytesWritten, dataShift);
+    if (SEC_RESULT_SUCCESS != result) {
+        SEC_LOG_ERROR("SecCipher_ProcessCtrWithDataShift failed");
+    }
+
+done:
+    return result;
+}
+
+Sec_Result SecCipher_KeyCheckOpaque(Sec_CipherHandle* cipherHandle, void* inputHandle, SEC_BYTE* expected) {
+    SEC_BYTE processed[SEC_AES_BLOCK_SIZE];
+    SEC_SIZE bytesWritten;
+
+    Sec_OpaqueBufferHandle *in_opaqueHandle = (Sec_OpaqueBufferHandle*)inputHandle;
+
+    if (NULL == in_opaqueHandle)
+    {
+        SEC_LOG_ERROR("null inputHandle");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (in_opaqueHandle->dataBufSize < SEC_AES_BLOCK_SIZE) {
+        SEC_LOG_ERROR("Invalid data buffer size: %d", in_opaqueHandle->dataBufSize);
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (cipherHandle == NULL) {
+        SEC_LOG_ERROR("null cipherHandle");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (cipherHandle->algorithm != SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING) {
+        SEC_LOG_ERROR("Invalid algorithm encountered: %d", cipherHandle->algorithm);
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecCipher_Process(cipherHandle, 
+        in_opaqueHandle->dataBuf, SEC_AES_BLOCK_SIZE, SEC_FALSE, 
+        processed, SEC_AES_BLOCK_SIZE, &bytesWritten)) {
+        SEC_LOG_ERROR("SecCipher_Process failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (memcmp(expected, processed, SEC_AES_BLOCK_SIZE) != 0) {
+        SEC_LOG_ERROR("computed result does not match the check value");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecCipher_ProcessCtrWithDataShift(Sec_CipherHandle* cipherHandle, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize, SEC_SIZE *bytesWritten, SEC_SIZE dataShift) {
+    SEC_SIZE outputSizeNeeded = 0;
+    Sec_Result res = SEC_RESULT_FAILURE;
+
+    CHECK_HANDLE(cipherHandle);
+
+    *bytesWritten = 0;
+
+    if (cipherHandle->last != 0)
+    {
+        SEC_LOG_ERROR("Last block has already been processed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecCipher_GetRequiredOutputSize(cipherHandle->algorithm,
+            cipherHandle->mode, cipherHandle->key_handle->key_data.info.key_type,
+            inputSize, &outputSizeNeeded, SEC_FALSE))
+    {
+        SEC_LOG_ERROR("SecCipher_GetRequiredOutputSize failed");
+        res = SEC_RESULT_FAILURE;
+        goto done;
+    }
+
+    if (output == NULL)
+    {
+        *bytesWritten = outputSizeNeeded;
+        res = SEC_RESULT_SUCCESS;
+        goto done;
+    }
+    else if (outputSizeNeeded > outputSize)
+    {
+        SEC_LOG_ERROR("output buffer is too small");
+        res = SEC_RESULT_BUFFER_TOO_SMALL;
+        goto done;
+    }
+
+    if (cipherHandle->algorithm != SEC_CIPHERALGORITHM_AES_CTR) {
+        SEC_LOG_ERROR("Function called with non AES CTR algorithm %d", cipherHandle->algorithm);
+        res = SEC_RESULT_INVALID_PARAMETERS;
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecCipher_Process(cipherHandle, input,
+            inputSize, SEC_FALSE, output, outputSize, bytesWritten)) {
+        SEC_LOG_ERROR("SecCipher_Process failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    return res;
+}
+
+Sec_Result SecProcessor_GetInfo(Sec_ProcessorHandle* secProcHandle,
+        Sec_ProcessorInfo * secProcInfo)
+{
+    CHECK_HANDLE(secProcHandle);
+
+    if(secProcInfo == NULL)
+        return SEC_RESULT_INVALID_PARAMETERS;
+
+    Sec_Memset(secProcInfo, 0x00, sizeof(Sec_ProcessorInfo));
+    strncpy((char *)secProcInfo->version, SEC_API_VERSION, strlen(SEC_API_VERSION));
+
+    return SEC_RESULT_SUCCESS;
+}
+
+static DH* _DH_create(SEC_BYTE *p, SEC_SIZE p_len, SEC_BYTE *g, SEC_SIZE g_len)
+{
+    DH *dh = NULL;
+
+    if ((dh=DH_new()) == NULL) {
+        SEC_LOG_ERROR("DH_new failed");
+        return NULL;
+    }
+
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    dh->p = BN_bin2bn(p, p_len, NULL);
+    dh->g = BN_bin2bn(g, g_len, NULL);
+#else
+    BIGNUM *bnp = BN_bin2bn(p, p_len, NULL);
+    BIGNUM *bng = BN_bin2bn(g, g_len, NULL);
+    DH_set0_pqg(dh, bnp, NULL, bng);
+#endif
+
+    return dh;
+}
+
+static Sec_Result _DH_generate_key(DH* dh, SEC_BYTE* publicKey, SEC_SIZE pubKeySize) {
+    if (!DH_generate_key(dh)) {
+        SEC_LOG_ERROR("DH_generate_key failed");
+        DH_free(dh);
+        return SEC_RESULT_FAILURE;
+    }
+
+    const BIGNUM *pub_key = NULL;
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
+    pub_key = dh->pub_key;
+#else
+    DH_get0_key(dh, &pub_key, NULL);
+#endif
+
+    if (pubKeySize < BN_num_bytes(pub_key)) {
+        SEC_LOG_ERROR("buffer to small");
+        return SEC_RESULT_FAILURE;
+    }
+
+    SEC_SIZE len = BN_bn2bin(pub_key, publicKey);
+    if (len < pubKeySize) {
+        memmove(publicKey + pubKeySize - len, publicKey, len);
+        memset(publicKey, 0, pubKeySize - len);
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+static Sec_Result _DH_compute(DH* dh, SEC_BYTE* pub_key, SEC_SIZE pub_key_len, SEC_BYTE* key, SEC_SIZE key_len, SEC_SIZE* written) {
+    if (key_len < (SEC_SIZE) DH_size(dh)) {
+        SEC_LOG_ERROR("key_len is not large enough to hold the computed DH key: %d", DH_size(dh));
+        return SEC_RESULT_FAILURE;
+    }
+
+    BIGNUM * pub_key_bn = BN_bin2bn(pub_key, pub_key_len, NULL);
+    if (pub_key_bn == NULL) {
+        SEC_LOG_ERROR("BN_bin2bn failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    *written = DH_compute_key(key, pub_key_bn, dh);
+    BN_free(pub_key_bn);
+    pub_key_bn = NULL;
+    if (*written <= 0) {
+        SEC_LOG_ERROR("DH_compute_key failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_KeyExchangeHandle* _DH_GetInstance(Sec_ProcessorHandle* proc, Sec_DHParameters *params) {
+    Sec_KeyExchangeHandle *handle = NULL;
+
+    DH *dh = _DH_create(params->p, params->pLen, params->g, params->gLen);
+    if (dh == NULL) {
+        SEC_LOG_ERROR("_generateDH failed");
+        goto done;
+    }
+
+    handle = malloc(sizeof(Sec_KeyExchangeHandle));
+    if (handle == NULL) {
+        SEC_LOG_ERROR("malloc failed");
+        goto done;
+    }
+
+    memset(handle, 0, sizeof(Sec_KeyExchangeHandle));
+
+    handle->dh = dh;
+    handle->proc = proc;
+    handle->alg = SEC_KEYEXCHANGE_DH;
+
+done:
+    if (handle == NULL) {
+        DH_free(dh);
+    }
+    return handle;
+}
+
+static Sec_KeyExchangeHandle* _ECDH_GetInstance(Sec_ProcessorHandle* proc, EC_PARAMETERS *params) {
+    Sec_KeyExchangeHandle *handle = NULL;
+    EC_KEY *key = NULL;
+
+    /* Create an Elliptic Curve Key object and set it up to use the ANSI X9.62 Prime 256v1 curve */
+    if(NULL == (key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1))) {
+        SEC_LOG_ERROR("EC_KEY_new_by_curve_name failed");
+        goto done;
+    }
+
+    handle = malloc(sizeof(Sec_KeyExchangeHandle));
+    if (handle == NULL) {
+        SEC_LOG_ERROR("malloc failed");
+        goto done;
+    }
+
+    memset(handle, 0, sizeof(Sec_KeyExchangeHandle));
+
+    handle->ecdh_priv = key;
+    handle->proc = proc;
+    handle->alg = SEC_KEYEXCHANGE_ECDH;
+
+done:
+    if (NULL == handle) {
+        SEC_ECC_FREE(key);
+    }
+
+    return handle;
+}
+
+static Sec_Result _ECDH_generate_key(EC_KEY *priv, SEC_BYTE* publicKey, SEC_SIZE pubKeySize) {
+    if (pubKeySize != sizeof(Sec_ECCRawPublicKey)) {
+        SEC_LOG_ERROR("pub key size does not match the size of Sec_ECCRawPublicKey");
+        return SEC_RESULT_FAILURE;
+    }
+
+    //generate ephemeral ec key
+    if (1 != EC_KEY_generate_key(priv)) {
+        SEC_LOG_ERROR("EC_KEY_generate_key failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecUtils_ECCToPubBinary(priv, (Sec_ECCRawPublicKey *) publicKey))
+    {
+        SEC_LOG_ERROR("SecUtils_ECCToPubBinary failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+static Sec_Result _ECDH_compute(EC_KEY *priv, SEC_BYTE* pub_key, SEC_SIZE pub_key_len, SEC_BYTE* key, SEC_SIZE key_len, SEC_SIZE* written) {
+    Sec_Result res = SEC_RESULT_FAILURE;
+    EC_KEY *ec_key_pub = NULL;
+
+    if (pub_key_len != sizeof(Sec_ECCRawPublicKey)) {
+        SEC_LOG_ERROR("pub_key_len does not match size of Sec_ECCRawPublicKey");
+        goto done;
+    }
+    
+    ec_key_pub = SecUtils_ECCFromPubBinary((Sec_ECCRawPublicKey*) pub_key);
+    if (ec_key_pub == NULL) {
+        SEC_LOG_ERROR("SecUtils_ECCFromPubBinary failed");
+        goto done;
+    }
+
+    /* Derive the shared secret */
+    *written = ECDH_compute_key(key, key_len, EC_KEY_get0_public_key(ec_key_pub), priv, NULL);
+    if (*written <= 0) {
+        SEC_LOG_ERROR("ECDH_compute_key failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    SEC_ECC_FREE(ec_key_pub);
+
+    return res;
+}
+
+Sec_Result SecKeyExchange_GetInstance(Sec_ProcessorHandle* proc, Sec_KeyExchangeAlgorithm exchangeType, void* exchangeParameters, Sec_KeyExchangeHandle** keyExchangeHandle) {
+    CHECK_HANDLE(proc);
+    CHECK_HANDLE(exchangeParameters);
+    CHECK_HANDLE(keyExchangeHandle);
+
+    *keyExchangeHandle = NULL;
+
+    switch (exchangeType) {
+        case SEC_KEYEXCHANGE_DH:
+            *keyExchangeHandle = _DH_GetInstance(proc, (Sec_DHParameters *) exchangeParameters);
+            if (*keyExchangeHandle == NULL) {
+                SEC_LOG_ERROR("_DH_GetInstance failed");
+            }
+            break;
+
+        case SEC_KEYEXCHANGE_ECDH:
+            *keyExchangeHandle = _ECDH_GetInstance(proc, (EC_PARAMETERS *) exchangeParameters);;
+            if (*keyExchangeHandle == NULL) {
+                SEC_LOG_ERROR("_ECDH_GetInstance failed");
+            }
+            break;
+
+        default:
+            SEC_LOG_ERROR("Unknown exchange_type encountered: %d", exchangeType);
+            break;
+    }
+
+    return *keyExchangeHandle != NULL ? SEC_RESULT_SUCCESS : SEC_RESULT_FAILURE;
+}
+
+Sec_Result SecKeyExchange_GenerateKeys(Sec_KeyExchangeHandle* keyExchangeHandle, SEC_BYTE* publicKey, SEC_SIZE pubKeySize) {
+    CHECK_HANDLE(keyExchangeHandle);
+    CHECK_HANDLE(publicKey);
+
+    switch (keyExchangeHandle->alg) {
+        case SEC_KEYEXCHANGE_DH:
+            if (SEC_RESULT_SUCCESS != _DH_generate_key(keyExchangeHandle->dh, publicKey, pubKeySize)) {
+                SEC_LOG_ERROR("_DH_generate_key failed");
+                return SEC_RESULT_FAILURE;
+            }
+            break;
+
+        case SEC_KEYEXCHANGE_ECDH:
+            if (SEC_RESULT_SUCCESS != _ECDH_generate_key(keyExchangeHandle->ecdh_priv, publicKey, pubKeySize)) {
+                SEC_LOG_ERROR("_ECDH_generate_key failed");
+                return SEC_RESULT_FAILURE;
+            }
+            break;
+
+        default:
+            SEC_LOG_ERROR("unknown alg encountered: %d", keyExchangeHandle->alg);
+            return SEC_RESULT_FAILURE;
+            break;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKeyExchange_ComputeSecret(Sec_KeyExchangeHandle* keyExchangeHandle, SEC_BYTE* otherPublicKey, SEC_SIZE otherPublicKeySize, Sec_KeyType typeComputed, SEC_OBJECTID idComputed, Sec_StorageLoc locComputed) {
+    CHECK_HANDLE(keyExchangeHandle);
+    CHECK_HANDLE(otherPublicKey);
+
+    SEC_BYTE shared_secret[512];
+    SEC_SIZE shared_secret_written;
+
+    if (!SecKey_IsSymetric(typeComputed)) {
+        SEC_LOG_ERROR("Invalid key type encountered: %d", typeComputed);
+        return SEC_RESULT_FAILURE;
+    }
+
+    switch (keyExchangeHandle->alg) {
+        case SEC_KEYEXCHANGE_DH:
+            if (SEC_RESULT_SUCCESS != _DH_compute(keyExchangeHandle->dh, otherPublicKey, otherPublicKeySize, shared_secret, sizeof(shared_secret), &shared_secret_written)) {
+                SEC_LOG_ERROR("_DH_generate_key failed");
+                return SEC_RESULT_FAILURE;
+            }
+            break;
+
+        case SEC_KEYEXCHANGE_ECDH:
+            if (SEC_RESULT_SUCCESS != _ECDH_compute(keyExchangeHandle->ecdh_priv, otherPublicKey, otherPublicKeySize, shared_secret, sizeof(shared_secret), &shared_secret_written)) {
+                SEC_LOG_ERROR("_DH_generate_key failed");
+                return SEC_RESULT_FAILURE;
+            }
+            break;
+
+        default:
+            SEC_LOG_ERROR("unknown alg encountered: %d", keyExchangeHandle->alg);
+            return SEC_RESULT_FAILURE;
+            break;
+    }
+
+    //splice the shared secret to get the key of desired type
+    //provision resulting key
+    SEC_SIZE final_key_len = SecKey_GetKeyLenForKeyType(typeComputed);
+
+    if (final_key_len > shared_secret_written) {
+        SEC_LOG_ERROR("Shared secret len %d is not large enough for desired key type %d", shared_secret_written, typeComputed);
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(keyExchangeHandle->proc, idComputed, locComputed, SecKey_GetClearContainer(typeComputed), shared_secret, final_key_len)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKeyExchange_Release(Sec_KeyExchangeHandle* keyExchangeHandle) {
+    if (NULL != keyExchangeHandle) {
+        switch (keyExchangeHandle->alg) {
+            case SEC_KEYEXCHANGE_DH:
+                DH_free(keyExchangeHandle->dh);
+                break;
+
+            case SEC_KEYEXCHANGE_ECDH:
+                SEC_ECC_FREE(keyExchangeHandle->ecdh_priv);
+                break;
+
+            default:
+                SEC_LOG_ERROR("unknown alg encountered: %d", keyExchangeHandle->alg);
+                return SEC_RESULT_FAILURE;
+                break;
+        }
+    }
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKey_Derive_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_StorageLoc loc, SEC_BYTE *nonce) {
+    //the algorithm for this derivation is platform specific.  Please consult Content Security for the derivation for your platform
+
+    /* constants */
+    const char *inputDerivationStr = "sivSha1";
+    Sec_DigestAlgorithm digestAlgorithm = SEC_DIGESTALGORITHM_SHA1;
+    const char *cipherAlgorithmStr = "aesEcbNone";
+    Sec_CipherAlgorithm cipherAlgorithm = SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING;
+    Sec_CipherMode cipherMode = SEC_CIPHERMODE_ENCRYPT;
+    Sec_KeyType keyType = SEC_KEYTYPE_AES_128;
+
+    int i;
+    SEC_SIZE keySize;
+    Sec_Result res = SEC_RESULT_FAILURE;
+    SEC_SIZE cipher_output_len;
+    SEC_BYTE cipher_output[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_BYTE *cipher_key = secProcHandle->root_key;
+    SEC_OBJECTID temp_key_id = SEC_OBJECTID_INVALID;
+    SEC_BYTE c1[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_BYTE c2[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_BYTE c3[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_BYTE c4[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_BYTE *c[] = { c1, c2, c3, c4 };
+
+    keySize = SecKey_GetKeyLenForKeyType(keyType);
+
+    res = SecKey_ComputeBaseKeyLadderInputs(secProcHandle, inputDerivationStr, cipherAlgorithmStr,
+            nonce, digestAlgorithm, keySize, c1, c2, c3, c4);
+    if (res != SEC_RESULT_SUCCESS)
+    {
+        SEC_LOG_ERROR("SecKey_ComputeBaseKeyLadderInputs failed");
+        goto done;
+    }
+
+    for (i = 1; i <= 4; i++)
+    {
+        /* encrypt digest */
+        temp_key_id = SEC_OBJECTID_OPENSSL_DERIVE_TMP;
+
+        /* provision temp key */
+        res = SecKey_Provision(secProcHandle, temp_key_id, SEC_STORAGELOC_RAM, SEC_KEYCONTAINER_RAW_AES_128, cipher_key, keySize);
+        if (SEC_RESULT_SUCCESS != res)
+        {
+            SEC_LOG_ERROR("SecKey_Provision failed");
+            goto done;
+        }
+
+        res = SecCipher_SingleInputId(secProcHandle, cipherAlgorithm, cipherMode, temp_key_id, NULL,
+                c[i-1], keySize, cipher_output, sizeof(cipher_output), &cipher_output_len);
+
+        /* delete temp key */
+        SecKey_Delete(secProcHandle, temp_key_id);
+
+        if (SEC_RESULT_SUCCESS != res)
+        {
+            SEC_LOG_ERROR("SecCipher_SingleInputId failed");
+            goto done;
+        }
+
+        cipher_key = cipher_output;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle, idDerived,
+            SEC_STORAGELOC_RAM_SOFT_WRAPPED, SEC_KEYCONTAINER_RAW_HMAC_128,
+            cipher_key, keySize)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        goto done;
+    }
+
+    res = SEC_RESULT_SUCCESS;
+
+done:
+    return res;
+}
+
+Sec_Result SecKey_Derive_HKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_MacAlgorithm macAlgorithm, SEC_BYTE *nonce, SEC_BYTE *salt, SEC_SIZE saltSize, SEC_BYTE *info, SEC_SIZE infoSize, SEC_OBJECTID baseKeyId) {
+    if (macAlgorithm != SEC_MACALGORITHM_HMAC_SHA1 && macAlgorithm != SEC_MACALGORITHM_HMAC_SHA256) {
+        SEC_LOG_ERROR("Unsupported mac algorithm specified: %d", macAlgorithm);
+        return SEC_RESULT_FAILURE;
+    }
+
+    //get secret from base key
+    SEC_BYTE secret[16];
+
+    if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyId(secProcHandle, baseKeyId, secret, sizeof(secret))) {
+        SEC_LOG_ERROR("_Sec_SymetricFromKeyId failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    //run kdf
+    SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_SIZE out_key_len = SecKey_GetKeyLenForKeyType(typeDerived);
+
+    if (1 != _HKDF(out_key, out_key_len,
+                            secret, sizeof(secret),
+                            salt, saltSize,
+                            info, infoSize, macAlgorithm)) {
+        SEC_LOG_ERROR("_HKDF failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle, idDerived,
+            locDerived, SecKey_GetClearContainer(typeDerived),
+            out_key, out_key_len)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    Sec_Memset(out_key, 0, sizeof(out_key));
+
+    return SEC_RESULT_SUCCESS;
+}
+
+Sec_Result SecKey_Derive_ConcatKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *nonce, SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize, SEC_OBJECTID baseKeyId) {
+    //get secret from base key
+    SEC_BYTE secret[16];
+
+    if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyId(secProcHandle, baseKeyId, secret, sizeof(secret))) {
+        SEC_LOG_ERROR("_Sec_SymetricFromKeyId failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    //run kdf
+    SEC_BYTE out_key[SEC_SYMETRIC_KEY_MAX_LEN];
+    SEC_SIZE out_key_len = SecKey_GetKeyLenForKeyType(typeDerived);
+
+    if (SEC_RESULT_SUCCESS != _ConcatKDF(secProcHandle,
+        secret, sizeof(secret),
+        otherInfo, otherInfoSize,
+        digestAlgorithm,
+        out_key, out_key_len)) {
+
+        SEC_LOG_ERROR("_ConcatKDF failed");
+        return SEC_RESULT_SUCCESS;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle, idDerived,
+            locDerived, SecKey_GetClearContainer(typeDerived),
+            out_key, out_key_len)) {
+        SEC_LOG_ERROR("SecKey_Provision failed");
+        return SEC_RESULT_FAILURE;
+    }
+
+    Sec_Memset(out_key, 0, sizeof(out_key));
 
     return SEC_RESULT_SUCCESS;
 }

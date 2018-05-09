@@ -53,6 +53,8 @@ typedef struct
 /* write a specified value at the specific bit position */
 #define SEC_BIT_WRITE(bit, input, val) ((~SEC_BIT_MASK(bit) | input) | ((val & 1) << bit))
 
+#define SEC_INVALID_EPOCH (SEC_SIZE)-1
+
 Sec_Result SecUtils_ValidateKeyStore(Sec_ProcessorHandle *proc, SEC_BOOL require_mac, void* store, SEC_SIZE store_len);
 Sec_Result SecUtils_FillKeyStoreUserHeader(Sec_ProcessorHandle *proc, SecUtils_KeyStoreHeader *header, Sec_KeyContainer container);
 SecUtils_KeyStoreHeader *SecUtils_GetKeyStoreUserHeader(void *store);
@@ -339,6 +341,56 @@ void BN_dump(const BIGNUM *bn);
 Sec_Result SecUtils_Extract_EC_KEY_X_Y(const EC_KEY *ec_key,
                                        BIGNUM **xp, BIGNUM **yp,
                                        Sec_KeyType *keyTypep);
+
+/**
+ * @brief Get the output length needed for encoding.
+ */
+SEC_SIZE SecUtils_Base64EncodeLength(SEC_SIZE size);
+
+/**
+ * @brief Get the output length needed for decoding.
+ */
+SEC_SIZE SecUtils_Base64DecodeLength(SEC_SIZE size);
+
+/**
+ * @brief Base64 url decode the input string
+ */
+Sec_Result SecUtils_Base64UrlDecode(const SEC_BYTE* input, SEC_SIZE in_len,
+        SEC_BYTE *output, SEC_SIZE max_output, SEC_SIZE *out_len);
+
+/**
+ * @brief Base64 url encode the input string
+ */
+Sec_Result SecUtils_Base64UrlEncode(const SEC_BYTE* input, SEC_SIZE in_len,
+        SEC_BYTE *output, SEC_SIZE max_output, SEC_SIZE *out_len);
+
+/**
+ * @brief base64 decode the input string.
+ */
+Sec_Result SecUtils_Base64Decode(const SEC_BYTE* input, SEC_SIZE in_len,
+        SEC_BYTE *output, SEC_SIZE max_output, SEC_SIZE* out_len);
+
+/**
+ * @brief Base64 encode the input string.
+ */
+Sec_Result SecUtils_Base64Encode(const SEC_BYTE* input, SEC_SIZE input_len,
+        SEC_BYTE *output, SEC_SIZE max_output, SEC_SIZE *out_len);
+
+/**
+ * @brief Convert the given epoch to iso formatted string.
+ */
+char* SecUtils_Epoch2IsoTime(SEC_SIZE epoch, char* iso_time, SEC_SIZE iso_time_size);
+
+/**
+ * @brief Convert the given iso time string to epoch value.
+ */
+SEC_SIZE SecUtils_IsoTime2Epoch(const char* iso_time, SEC_SIZE *epoch);
+
+/**
+ * @brief Get the current epoch value.
+ */
+SEC_SIZE SecUtils_GetUtcNow();
+
 
 #ifdef __cplusplus
 }
