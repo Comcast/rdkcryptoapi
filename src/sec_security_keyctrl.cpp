@@ -73,7 +73,7 @@ static char* _SecKeyCtrl_RightsVectorToString(const SEC_BYTE *rights, char *str,
 
 static SEC_BOOL _SecKeyCtrl_IsKeyTypeCacheable(Sec_KeyType keyType)
 {
-    return SecKey_IsSymetric(keyType);
+    return SecKey_IsSymetric(keyType) || keyType == SEC_KEYTYPE_ECC_NISTP256;
 }
 
 static SEC_BOOL _SeckeyCtrl_VectorHasUniversalRights(SEC_BYTE *rights)
@@ -121,7 +121,16 @@ void SecKeyCtrl_SetDefaultKeyProperties(Sec_KeyProperties *keyProperties, Sec_Ke
         keyProperties->rights[3] = SEC_KEYOUTPUTRIGHT_ANALOG_OUTPUT_ALLOWED;
         keyProperties->rights[4] = SEC_KEYOUTPUTRIGHT_TRANSCRIPTION_COPY_ALLOWED;
         keyProperties->rights[5] = SEC_KEYOUTPUTRIGHT_UNRESTRICTED_COPY_ALLOWED;
+}
 
+SEC_BOOL SecKeyCtrl_KeyPropertiesContainOutputRight(Sec_KeyProperties *keyProps, Sec_KeyOutputRight right)
+{
+   for(int i=0;i<SEC_KEYRIGHTS_LEN;i++)
+   {
+       if (keyProps->rights[i] == right)
+           return SEC_TRUE;
+   }
+   return SEC_FALSE;
 }
 
 SEC_BOOL SecKeyCtrl_IsDefaultKeyProperties(Sec_KeyProperties *keyProps)

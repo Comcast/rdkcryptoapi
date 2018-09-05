@@ -125,7 +125,7 @@ SEC_SIZE SecUtils_LsDir(const char *path, Sec_LsDirEntry *entries, SEC_SIZE maxN
 /**
  * @brief Write a BIGNUM value into the specified buffer
  */
-void SecUtils_BigNumToBuffer(BIGNUM *bignum, SEC_BYTE *buffer,
+Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer,
         SEC_SIZE buffer_len);
 
 /**

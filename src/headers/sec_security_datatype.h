@@ -626,6 +626,13 @@ typedef struct Sec_CertificateHandle_struct Sec_CertificateHandle;
  */
 typedef struct Sec_KeyExchangeHandle_struct Sec_KeyExchangeHandle;
 
+/**
+ * @brief Opaque buffer handle
+ */
+typedef struct Sec_OpaqueBufferHandle_struct Sec_OpaqueBufferHandle;
+
+typedef void Sec_ProtectedMemHandle;
+
 #ifdef __cplusplus
 }
 #endif

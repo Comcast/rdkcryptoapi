@@ -119,6 +119,7 @@ struct Sec_CipherHandle_struct
     Sec_KeyHandle* key_handle;
     SEC_BOOL last;
     EVP_CIPHER_CTX *evp_ctx;
+    SEC_BOOL svp_required;
 };
 
 struct Sec_DigestHandle_struct
@@ -194,9 +195,8 @@ struct Sec_ProcessorHandle_struct
     _Sec_RAMKeyData *ram_keys;
     _Sec_RAMBundleData *ram_bundles;
     _Sec_RAMCertificateData *ram_certs;
-    char keystorage_file_dir[SEC_MAX_FILE_PATH_LEN];
-    char certstorage_file_dir[SEC_MAX_FILE_PATH_LEN];
-    char bundlestorage_file_dir[SEC_MAX_FILE_PATH_LEN];
+    char *global_dir;
+    char *app_dir;
     int device_settings_init_flag;
 };
 
@@ -206,6 +206,12 @@ struct Sec_KeyExchangeHandle_struct
     Sec_KeyExchangeAlgorithm alg;
     DH *dh;
     EC_KEY *ecdh_priv;
+};
+
+struct Sec_OpaqueBufferHandle_struct
+{
+    SEC_BYTE *dataBuf;
+    SEC_SIZE dataBufSize;
 };
 
 #ifdef __cplusplus

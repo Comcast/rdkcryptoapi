@@ -31,6 +31,7 @@ Sec_Result SecKeyCtrl_ValidateKeyProperties(int* device_settings_init_flag, Sec_
 void SecKeyCtrl_SetDefaultKeyProperties(Sec_KeyProperties *keyProperties, Sec_KeyType keyType, SEC_SIZE keyLength);
 
 SEC_BOOL SecKeyCtrl_IsDefaultKeyProperties(Sec_KeyProperties *keyProps);
+SEC_BOOL SecKeyCtrl_KeyPropertiesContainOutputRight(Sec_KeyProperties *keyProps, Sec_KeyOutputRight right);
 
 
 #ifdef __cplusplus

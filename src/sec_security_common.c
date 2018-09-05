@@ -588,6 +588,7 @@ Sec_KeyType SecKey_GetRSAKeyTypeForBitLength(int numBits) {
 		case 3072:
 			return SEC_KEYTYPE_RSA_3072;
 		default:
+		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
 		  return SEC_KEYTYPE_NUM;
 	}
 }
@@ -601,6 +602,35 @@ Sec_KeyType SecKey_GetRSAPubKeyTypeForBitLength(int numBits) {
 		case 3072:
 			return SEC_KEYTYPE_RSA_3072_PUBLIC;
 		default:
+		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyContainer SecKey_GetRSAKCForBitLength(int numBits) {
+	switch (numBits) {
+		case 1024:
+			return SEC_KEYCONTAINER_RAW_RSA_1024;
+		case 2048:
+			return SEC_KEYCONTAINER_RAW_RSA_2048;
+		case 3072:
+			return SEC_KEYCONTAINER_RAW_RSA_3072;
+		default:
+		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyContainer SecKey_GetRSAPubKCForBitLength(int numBits) {
+	switch (numBits) {
+		case 1024:
+			return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
+		case 2048:
+			return SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC;
+		case 3072:
+			return SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC;
+		default:
+		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
 		  return SEC_KEYTYPE_NUM;
 	}
 }
@@ -614,6 +644,7 @@ Sec_KeyType SecKey_GetRSAKeyTypeForByteLength(int numBytes) {
 		case 384:
 			return SEC_KEYTYPE_RSA_3072;
 		default:
+		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
 		  return SEC_KEYTYPE_NUM;
 	}
 }
@@ -627,6 +658,35 @@ Sec_KeyType SecKey_GetRSAPubKeyTypeForByteLength(int numBytes) {
 		case 384:
 			return SEC_KEYTYPE_RSA_3072_PUBLIC;
 		default:
+		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyType SecKey_GetRSAKCForByteLength(int numBytes) {
+	switch (numBytes) {
+		case 128:
+			return SEC_KEYCONTAINER_RAW_RSA_1024;
+		case 256:
+			return SEC_KEYCONTAINER_RAW_RSA_2048;
+		case 384:
+			return SEC_KEYCONTAINER_RAW_RSA_3072;
+		default:
+		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
+		  return SEC_KEYTYPE_NUM;
+	}
+}
+
+Sec_KeyType SecKey_GetRSAPubKCForByteLength(int numBytes) {
+	switch (numBytes) {
+		case 128:
+			return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
+		case 256:
+			return SEC_KEYCONTAINER_RAW_RSA_2048_PUBLIC;
+		case 384:
+			return SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC;
+		default:
+		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
 		  return SEC_KEYTYPE_NUM;
 	}
 }
@@ -663,7 +723,7 @@ Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
 	    if (SEC_RESULT_SUCCESS != SecKey_Provision(secProcHandle,
 	            SEC_OBJECTID_SIG_FROM_CERT,
 	            SEC_STORAGELOC_RAM_SOFT_WRAPPED,
-	            SecKey_GetRSAPubKeyTypeForBitLength(Sec_BEBytesToUint32(rsaPubKey.modulus_len_be)),
+	            SecKey_GetRSAPubKCForByteLength(Sec_BEBytesToUint32(rsaPubKey.modulus_len_be)),
                 (SEC_BYTE *) &rsaPubKey, sizeof(rsaPubKey)))
 	    {
 	        SEC_LOG_ERROR("SecKey_Provision failed");

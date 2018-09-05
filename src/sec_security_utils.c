@@ -445,19 +445,21 @@ SEC_BOOL SecUtils_FileExists(const char *path)
     return 1;
 }
 
-void SecUtils_BigNumToBuffer(BIGNUM *bignum, SEC_BYTE *buffer,
-                             SEC_SIZE buffer_len)
+Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer, SEC_SIZE buffer_len)
 {
     SEC_SIZE num_bytes;
 
     memset(buffer, 0, buffer_len);
-
-    if (bignum == NULL)
-        return;
-
     num_bytes = BN_num_bytes(bignum);
 
+    if (num_bytes > buffer_len) {
+        SEC_LOG_ERROR("buffer not large enough.  needed: %d, actual: %d", num_bytes, buffer_len);
+        return SEC_RESULT_FAILURE;
+    }
+
     BN_bn2bin(bignum, buffer + buffer_len - num_bytes);
+
+    return SEC_RESULT_SUCCESS;
 }
 
 RSA *SecUtils_RSAFromPrivBinary(Sec_RSARawPrivateKey *binary)
@@ -1193,10 +1195,68 @@ done: return ec_key;
 // $$$ they won't have a private key)
 EC_KEY *SecUtils_ECCFromOnlyPrivBinary(Sec_ECCRawOnlyPrivateKey *binary)
 {
+    EC_GROUP *group = EC_GROUP_new_by_curve_name(NID_X9_62_prime256v1);
+    if (group == NULL) {
+        SEC_LOG_ERROR("EC_GROUP_new_by_curve_name failed");
+        return NULL;
+    }
+
+    EC_POINT *pub_key = EC_POINT_new(group);
+    if (pub_key == NULL) {
+        SEC_LOG_ERROR("EC_POINT_new failed");
+
+        EC_GROUP_free(group);
+
+        return NULL;
+    }
+
+    BN_CTX *ctx = BN_CTX_new();
+    if (ctx == NULL) {
+        SEC_LOG_ERROR("BN_CTX_new failed");
+
+        EC_GROUP_free(group);
+        EC_POINT_free(pub_key);
+
+        return NULL;
+    }
+
+    if(!EC_POINT_mul(group, pub_key, BN_bin2bn(binary->prv, sizeof binary->prv, NULL), NULL, NULL, ctx)) {
+        SEC_LOG_ERROR("EC_POINT_mul failed");
+
+        EC_GROUP_free(group);
+        EC_POINT_free(pub_key);
+        BN_CTX_free(ctx);
+
+        return NULL;
+    }
+
     EC_KEY *ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1); //create ec_key structure with NIST p256 curve;
 
-    EC_KEY_set_private_key(ec_key,
-                           BN_bin2bn(binary->prv, sizeof binary->prv, NULL));
+    if (!EC_KEY_set_private_key(ec_key, BN_bin2bn(binary->prv, sizeof binary->prv, NULL))) {
+        SEC_LOG_ERROR("EC_KEY_set_private_key failed");
+
+        EC_GROUP_free(group);
+        EC_POINT_free(pub_key);
+        SEC_ECC_FREE(ec_key);
+        BN_CTX_free(ctx);
+
+        return NULL;
+    }
+
+    if (!EC_KEY_set_public_key(ec_key, pub_key)) {
+        SEC_LOG_ERROR("EC_KEY_set_public_key failed");
+
+        EC_GROUP_free(group);
+        EC_POINT_free(pub_key);
+        SEC_ECC_FREE(ec_key);
+        BN_CTX_free(ctx);
+
+        return NULL;
+    }
+
+    EC_GROUP_free(group);
+    EC_POINT_free(pub_key);
+    BN_CTX_free(ctx);
 
     return ec_key;
 }
@@ -2273,21 +2333,6 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key,
         }
         goto done;
     }
-//#define VERIFY_CREATED_EC_POINT
-#ifdef VERIFY_CREATED_EC_POINT
-    // debugging code
-    BIGNUM *x1 = BN_new();
-    BIGNUM *y1 = BN_new();
-    if (!EC_POINT_get_affine_coordinates_GF2m(group, key_2_wrap_point, x1, y1,
-                                              ctx))
-        SEC_LOG_ERROR("EC_POINT_get_affine_coordinates_GF2m failed");
-    SEC_PRINT("inputAsBN: ");
-    BN_dump(inputAsBN);
-    SEC_PRINT("x1: ");
-    BN_dump(x1);
-    SEC_PRINT("y1: ");
-    BN_dump(y1);
-#endif
 
     /* Calc sender's shared point 'wP' => this gets sent back to receiver */
     sender_share = EC_POINT_new(group);
@@ -2355,48 +2400,33 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key,
         goto done;
     }
 
-    // Clear output buffer to start, in case any of the bignums don't take all
-    // their alloted space due to leading zero bytes not being stored by BN_bn2bin
-    Sec_Memset(output, 0, 4 * SEC_ECC_NISTP256_KEY_LEN);
-
-    // Copy/convert the two points into our output buffer
-    // C1=g^x and C2=m'*s
-    // BN_bn2bin does not write leading zero bytes, so the length of the
-    // converted bignums is not guaranteed to be SEC_ECC_NISTP256_KEY_LEN.
-    // We ignore the return value from BN_bn2bin, the number of bytes written.
-
     // Dissect shared_secret to get its coordinates and output them
     EC_POINT_get_affine_coordinates_GFp(group, sender_share, x, y, ctx);
 
-    (void) BN_bn2bin(x, (unsigned char *) &output[0 * SEC_ECC_NISTP256_KEY_LEN]);
-    (void) BN_bn2bin(y, (unsigned char *) &output[1 * SEC_ECC_NISTP256_KEY_LEN]);
+    if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(x, (unsigned char *) &output[0 * SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN)) {
+        SEC_LOG_ERROR("SecUtils_BigNumToBuffer failed");
+        goto done;
+    }
 
-#ifdef DEBUG_EC
-    //$$$ debugging code -- Using x and y from sender_share
-    SEC_PRINT("Plaintext: "); Sec_PrintHex(input, inputSize); SEC_PRINT("\n");
-    SEC_PRINT("Random: "); BN_dump(sender_rand);
-    SEC_PRINT("key_2_wrap_point: "); EC_POINT_dump(key_2_wrap_point); SEC_PRINT("\n");
-    SEC_PRINT("EC key for Elgamal: "); EC_KEY_dump(ec_key);
-    SEC_PRINT("sender_share X="); BN_dump(x);
-    SEC_PRINT("   Y="); BN_dump(y);
-#endif
+    if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(y, (unsigned char *) &output[1 * SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN)) {
+        SEC_LOG_ERROR("SecUtils_BigNumToBuffer failed");
+        goto done;
+    }
 
     // Dissect wrapped_key to get its coordinates and output them
     EC_POINT_get_affine_coordinates_GFp(group, wrapped_key, x, y, ctx);
 
-    (void) BN_bn2bin(x, (unsigned char *) &output[2 * SEC_ECC_NISTP256_KEY_LEN]);
-    (void) BN_bn2bin(y, (unsigned char *) &output[3 * SEC_ECC_NISTP256_KEY_LEN]);
+    if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(x, (unsigned char *) &output[2 * SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN)) {
+        SEC_LOG_ERROR("SecUtils_BigNumToBuffer failed");
+        goto done;
+    }
+
+    if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(y, (unsigned char *) &output[3 * SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN)) {
+        SEC_LOG_ERROR("SecUtils_BigNumToBuffer failed");
+        goto done;
+    }
 
     res = 4 * SEC_ECC_NISTP256_KEY_LEN;
-
-#ifdef DEBUG_EC
-    //$$$ debugging code -- Using x and y from wrapped_key
-    SEC_PRINT("wrapped_key X="); BN_dump(x);
-    SEC_PRINT("   Y="); BN_dump(y);
-    EC_POINT_dump(wrapped_key); SEC_PRINT("\n");
-    // remember that res is the length of the output
-    SEC_PRINT("Ciphertext:"); Sec_PrintHex(output, res); SEC_PRINT("\n");
-#endif
 
 done:
     if (NULL != x)
@@ -2563,11 +2593,6 @@ int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input,
         SEC_LOG_ERROR("Failed to make wrapped_key EC Point");
         goto done;
     }
-#ifdef DEBUG_EC
-    //$$$ debugging code
-    SEC_PRINT("wrapped_key X="); BN_dump(x);
-    SEC_PRINT("   Y="); BN_dump(y);
-#endif
     // Note that BN_bin2bn can be safely called on a previously used BN
 
     // Get X and Y coords of EC Point sender_share and create the point 'C2'
@@ -2590,15 +2615,6 @@ int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input,
         goto done;
     }
 
-#ifdef DEBUG_EC
-    //$$$ debugging code
-    SEC_PRINT("Decrypting:");
-    Sec_PrintHex(input, inputSize);
-    SEC_PRINT("\n");
-    SEC_PRINT("sender_share X="); BN_dump(x);
-    SEC_PRINT("   Y="); BN_dump(y);
-#endif
-
     // Calculate result shared_secret = our_private_key * C1
     EC_POINT_mul(group, shared_secret, NULL, sender_share, our_priv_key, ctx);
 
@@ -2611,19 +2627,10 @@ int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input,
     EC_POINT_get_affine_coordinates_GFp(group, wrapped_point, x, /*y=*/NULL,
                                         ctx);
 
-    res = BN_bn2bin(x, (unsigned char *) output);
-    if (res != BN_num_bytes(x))
-    {
-        SEC_LOG_ERROR("Output size needed != what BN_num_bytes said it would be");
+    if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(x, output, SEC_ECC_NISTP256_KEY_LEN)) {
+        SEC_LOG_ERROR("SecUtils_BigNumToBuffer failed");
         goto done;
     }
-
-#ifdef DEBUG_EC
-    //$$$ debugging code
-    SEC_PRINT("Decrypted output:");
-    Sec_PrintHex(output, outputSize);
-    SEC_PRINT("\n");
-#endif
 
     res = SEC_ECC_NISTP256_KEY_LEN;
 

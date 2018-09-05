@@ -17,7 +17,6 @@
 #ifndef SEC_SECURITY_H_
 #define SEC_SECURITY_H_
 
-#include "sec_version.h"
 #include "sec_security_datatype.h"
 #include "sec_security_common.h"
 #include <stdio.h>
@@ -94,6 +93,22 @@ extern "C"
  */
 Sec_Result SecProcessor_GetInstance(Sec_ProcessorHandle** secProcHandle,
         Sec_ProcessorInitParams* socInitParams);
+
+/**
+ * @brief Initialize secure processor
+ *
+ * Initializes the secure processor, generates key derivation base key,
+ * sets up all required resources.  Only one secure processor can be
+ * active at a time.
+ *
+ * @param secProcHandle pointer to a processor handle that will be set to
+ * a constructed handle.
+ * @param globalDir path to the read only object directory.  Can be set to NULL.
+ * @param appDir path to the read/write object directory.  Can be set to NULL.
+ *
+ * @return The status of the operation
+ */
+Sec_Result SecProcessor_GetInstance_Directories(Sec_ProcessorHandle** secProcHandle, const char* globalDir, const char* appDir);
 
 /**
  * @brief Get the minimum depth of the hardware key ladder
@@ -229,12 +244,20 @@ Sec_Result SecCipher_ProcessFragmented(Sec_CipherHandle* cipherHandle, SEC_BYTE*
  * of bytes written to the output buffer
  */
 Sec_Result SecCipher_ProcessOpaque(Sec_CipherHandle* cipherHandle,
-        void* inputHandle, void* outputHandle, SEC_BOOL lastInput,
+        Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle, SEC_BOOL lastInput,
         SEC_SIZE *bytesWritten);
 
-Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, void* inputHandle, void* outputHandle, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
+Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
 
-Sec_Result SecCipher_KeyCheckOpaque(Sec_CipherHandle* cipherHandle, void* inputHandle, SEC_BYTE* expected);
+/**
+ * @brief Perform cipher operation on the opaque input handle and check the output against the expected value.
+ *
+ * @param cipherHandle pointer to Sec_CipherHandle
+ * @param void inputHandle pointer to opaque buffer containing input
+ * @param SEC_SIZE checkLength number of bytes used for comparison
+ * @param SEC_BYTE expected expected value used for comparison
+ */
+Sec_Result SecCipher_KeyCheckOpaque(Sec_CipherHandle* cipherHandle, Sec_OpaqueBufferHandle* inputHandle, SEC_SIZE checkLength, SEC_BYTE* expected);
 /**
  * @brief Release the cipher object
  *
@@ -900,11 +923,20 @@ Sec_Result SecCodeIntegrity_SecureBootEnabled(void);
 
 Sec_Result SecSVP_SetTime(time_t time);
 
-Sec_Result Sec_OpaqueBufferMalloc(SEC_SIZE bufLength, void **handle, void *params);
+/* 2.2  */
+Sec_Result Sec_OpaqueBufferMalloc(SEC_SIZE bufLength, void **handle, void *params)
+__attribute__ ((deprecated));
 
-Sec_Result Sec_OpaqueBufferWrite(void *handle, SEC_SIZE offset, void *data, SEC_SIZE length);
+Sec_Result Sec_OpaqueBufferWrite(Sec_OpaqueBufferHandle *handle, SEC_SIZE offset, void *data, SEC_SIZE length)
+ __attribute__ ((deprecated));
 
-Sec_Result Sec_OpaqueBufferFree(void *handle, void *params);
+Sec_Result Sec_OpaqueBufferFree(Sec_OpaqueBufferHandle *handle, void *params)
+__attribute__ ((deprecated));
+
+Sec_Result SecOpaqueBuffer_Malloc(SEC_SIZE bufLength, Sec_OpaqueBufferHandle **handle);
+Sec_Result SecOpaqueBuffer_Write(Sec_OpaqueBufferHandle *handle, SEC_SIZE offset, SEC_BYTE *data, SEC_SIZE length);
+Sec_Result SecOpaqueBuffer_Free(Sec_OpaqueBufferHandle *handle);
+Sec_Result SecOpaqueBuffer_Release(Sec_OpaqueBufferHandle *handle, Sec_ProtectedMemHandle **svpHandle);
 
 Sec_Result SecKeyExchange_GetInstance(Sec_ProcessorHandle* secProcHandle, Sec_KeyExchangeAlgorithm exchangeType, void* exchangeParameters, Sec_KeyExchangeHandle** keyExchangeHandle);
 
