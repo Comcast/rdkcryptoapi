@@ -1,5 +1,5 @@
 /**
- * Copyright 2014 Comcast Cable Communications Management, LLC
+ * Copyright 2014 - 2019 Comcast Cable Communications Management, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -20,6 +20,9 @@
 #define SEC_SECURITY_ASN1KC_H_
 
 #include "sec_security_datatype.h"
+#include <openssl/asn1t.h>
+#include <openssl/stack.h>
+#include <openssl/safestack.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -30,7 +33,35 @@ extern "C"
  * @brief Opaque certificate handle
  *
  */
-typedef struct Asn1KC Sec_Asn1KC;
+#define ASN1KCATTRIBUTE_T_CHOICE_INTEGER     0
+#define ASN1KCATTRIBUTE_T_CHOICE_BITSTRING   1
+#define ASN1KCATTRIBUTE_T_CHOICE_OCTETSTRING 2
+#define ASN1KCATTRIBUTE_T_CHOICE_NULL        3
+#define ASN1KCATTRIBUTE_T_CHOICE_IA5STRING   4
+#define ASN1KCATTRIBUTE_T_CHOICE_UTCTIME     5
+
+typedef struct {
+  int type;
+  union {
+      ASN1_INTEGER      *integer;
+      ASN1_BIT_STRING   *bitstring;
+      ASN1_OCTET_STRING *octetstring;
+      ASN1_NULL         *null;
+      ASN1_IA5STRING    *ia5string;
+      ASN1_UTCTIME      *utctime;
+  }c;
+} Asn1KCAttribute_t_c;
+
+typedef struct {
+  ASN1_IA5STRING *name;
+  Asn1KCAttribute_t_c *value;
+} Asn1KCAttribute_t;
+
+typedef STACK_OF(Asn1KCAttribute_t) Sec_Asn1KC;
+
+#define sk_Asn1KCAttribute_t_num(st)        sk_num(CHECKED_STACK_OF(Asn1KCAttribute_t, st))
+#define sk_Asn1KCAttribute_t_value(st, i)   ((Asn1KCAttribute_t *)sk_value(CHECKED_STACK_OF(Asn1KCAttribute_t, st), i))
+#define sk_Asn1KCAttribute_t_push(st, val)  sk_push(CHECKED_STACK_OF(Asn1KCAttribute_t, st), CHECKED_PTR_OF(Asn1KCAttribute_t, val))
 
 Sec_Asn1KC *SecAsn1KC_Alloc();
 void SecAsn1KC_Free(Sec_Asn1KC *kc);
