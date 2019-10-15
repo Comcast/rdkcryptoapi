@@ -29,8 +29,11 @@
 #ifndef SEC_COMMON_17
 #include "sec_security_asn1kc.h"
 #endif
+
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 #include <openssl/rsa.h>
 #include <openssl/ec.h>
+#endif
 
 #ifdef __cplusplus
 extern "C"
@@ -388,6 +391,8 @@ SEC_BOOL SecKey_IsSymetric(Sec_KeyType type);
  */
 SEC_BOOL SecKey_IsAES(Sec_KeyType type);
 
+SEC_BOOL SecKey_IsHMAC(Sec_KeyType type);
+
 /**
  * @brief Checks if a passed in key type is RSA
  *
@@ -567,15 +572,16 @@ void Sec_NOPLoggerCb(const char *fmt, ...);
  */
 void Sec_PrintHex(void* data, SEC_SIZE numBytes);
 
-/**
- * Initialize all OpenSSL algorithms used by the Security API.  Register securityapi engine.
- */
-void Sec_InitOpenSSL(void);
-
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 /**
  * Print OpenSSL version information
  */
 void Sec_PrintOpenSSLVersion();
+
+/**
+ * Initialize all OpenSSL algorithms used by the Security API.  Register securityapi engine.
+ */
+void Sec_InitOpenSSL(void);
 
 /**
  * @brief Obtain an OpenSSL RSA key from the Security API key handle.  This RSA
@@ -602,6 +608,8 @@ X509 * SecCertificate_DerToX509(void *mem, SEC_SIZE len);
  * @brief Obtain an OpenSSL X509 certificate from the Security API cert handle.
  */
 X509* SecCertificate_ToX509(Sec_CertificateHandle *cert);
+
+#endif
 
 /**
  * @brief Find if the certificate with a specific id has been provisioned
@@ -732,7 +740,7 @@ Sec_Result SecKey_GenerateWrappedKeyAsn1Off(SEC_BYTE *payload, SEC_SIZE payloadL
                                          SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset);
 
 Sec_Result SecKey_GenerateWrappedKeyAsn1V3(SEC_BYTE *payload, SEC_SIZE payloadLen, Sec_KeyType wrappedKeyType,
-                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, 
+                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen,
                                          SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
                                          SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset);
 /**
@@ -764,6 +772,8 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferV3(SEC_BYTE *asn1, SEC_SIZE a
                                                       SEC_BYTE *payload, SEC_SIZE payloadLen, SEC_SIZE *written,
                                                       Sec_KeyType *wrappedKeyType, SEC_OBJECTID *wrappingId, SEC_BYTE *wrappingIv, Sec_CipherAlgorithm *wrappingAlg, SEC_SIZE *key_offset,
                                                       SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, SEC_SIZE *writtenWrappingKey);
+
+void SecKeyProperties_SetDefault(Sec_KeyProperties* props, Sec_KeyType type);
 
 #endif
 

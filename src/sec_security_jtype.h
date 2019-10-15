@@ -15,31 +15,24 @@
  * limitations under the License.
  */
 
+#ifndef SEC_SECURITY_JTYPE_H_
+#define SEC_SECURITY_JTYPE_H_
+
+#include <stdarg.h>
 #include "sec_security.h"
-#include <string.h>
 
-void SecBuffer_Init(Sec_Buffer *buffer, void *mem, SEC_SIZE len)
-{
-    buffer->base = (SEC_BYTE *) mem;
-    buffer->size = len;
-    buffer->written = 0;
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+Sec_Result SecJType_ProcessKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID macingKid, const void *jwtToken,
+        SEC_SIZE jwtTokenLen, SEC_BYTE *out_wrappedKey, SEC_SIZE wrappedKeyBufSize,
+        SEC_SIZE *out_wrappedKeyWritten, Sec_KeyProperties *out_keyProps,
+        Sec_CipherAlgorithm *wrappingAlg, SEC_BYTE* iv);
+
+#ifdef __cplusplus
 }
+#endif
 
-void SecBuffer_Reset(Sec_Buffer *buffer)
-{
-    buffer->written = 0;
-}
-
-Sec_Result SecBuffer_Write(Sec_Buffer *buffer, void *data, SEC_SIZE len)
-{
-    int space_left = buffer->size - buffer->written;
-
-    if (space_left < 0 || (SEC_SIZE) space_left < len)
-        return SEC_RESULT_BUFFER_TOO_SMALL;
-
-    memcpy(buffer->base + buffer->written, data, len);
-    buffer->written += len;
-
-    return SEC_RESULT_SUCCESS;
-}
-
+#endif /* SEC_SECURITY_JTYPE_H_ */

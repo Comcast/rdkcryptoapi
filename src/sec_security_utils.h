@@ -15,19 +15,11 @@
  * limitations under the License.
  */
 
-/**
- * @file sec_security_utils.h
- *
- * @brief Helper utilities for implementing the Security API
- *
- */
-
 #ifndef SEC_SECURITY_UTILS_H_
 #define SEC_SECURITY_UTILS_H_
 
 #include "sec_security.h"
-#include <openssl/rsa.h>
-#include <openssl/x509.h>
+#include <time.h>
 
 #ifdef __cplusplus
 extern "C"
@@ -122,11 +114,11 @@ typedef struct
  */
 SEC_SIZE SecUtils_LsDir(const char *path, Sec_LsDirEntry *entries, SEC_SIZE maxNumEntries);
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 /**
  * @brief Write a BIGNUM value into the specified buffer
  */
-Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer,
-        SEC_SIZE buffer_len);
+Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer, SEC_SIZE buffer_len);
 
 /**
  * @brief Obtain an OpenSSL RSA object from the private key binary blob
@@ -174,17 +166,15 @@ RSA *SecUtils_RSAFromPEMPriv(SEC_BYTE *pem, SEC_SIZE pem_len);
 
 RSA *SecUtils_RSAFromPEMPub(SEC_BYTE *pem, SEC_SIZE pem_len);
 
-SEC_BOOL SecUtils_RSAIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
-
 RSA* SecUtils_RSAFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
 
 SEC_BOOL SecUtils_RSAHasPriv(RSA *rsa);
 
-SEC_BOOL SecUtils_ECCIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
-
 EC_KEY* SecUtils_ECCFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
 
 SEC_BOOL SecUtils_ECCHasPriv(EC_KEY *ec_key);
+
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 
 /**
  * @brief Obtain an OpenSSL EC_KEY object from the private key binary blob
@@ -225,71 +215,29 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inpu
 int SecUtils_ElGamal_Encrypt(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize);
 int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input, SEC_SIZE inputSize, SEC_BYTE* output, SEC_SIZE outputSize);
 
+#endif
+
 /**
  * @brief Write an OpenSSL X509 object in DER format
  */
 SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem);
 
 X509 * SecUtils_DerToX509(SEC_BYTE *der, SEC_SIZE der_len);
+
 SEC_SIZE SecUtils_X509ToDerLen(X509 *x509, void *mem, SEC_SIZE mem_len);
 
 /**
  * @brief Verify X509 certificate with public RSA key
  */
-Sec_Result SecUtils_VerifyX509WithRawRSAPublicKey(
-        X509 *x509, Sec_RSARawPublicKey* public_key);
+Sec_Result SecUtils_VerifyX509WithRawRSAPublicKey(X509 *x509, Sec_RSARawPublicKey* public_key);
 
 /**
  * @brief Verify X509 certificate with public ECC key
  */
-Sec_Result SecUtils_VerifyX509WithRawECCPublicKey(
-        X509 *x509, Sec_ECCRawPublicKey* public_key);
-
-
-/**
- * @brief Increment the AES 128-bit counter
- */
-void SecUtils_AesCtrInc(SEC_BYTE *counter);
-
-/*
- * @brief Create Digest Info structure for RSA signing from the digest
- */
-Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE* padded_len, SEC_SIZE keySize);
-
-/**
- * @brief Perform required padding for an RSA input data
- */
-Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE keySize);
-
-/**
- * @brief Checks whether the specified strings ends with the other string
- */
-SEC_BYTE SecUtils_EndsWith(const char* str, const char* end);
-
-/**
- * @brief obtain the index of the item in a list
- */
-int SecUtils_ItemIndex(SEC_OBJECTID *items, SEC_SIZE numItems, SEC_OBJECTID item);
-
-/**
- * @brief insert new item into the list if it does not exist.
- */
-SEC_SIZE SecUtils_UpdateItemList(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_SIZE numItems, SEC_OBJECTID item_id);
-
-/**
- * @brief insert new items into the list from the specified directory.
- */
-SEC_SIZE SecUtils_UpdateItemListFromDir(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_SIZE numItems, const char* dir, const char* ext);
+Sec_Result SecUtils_VerifyX509WithRawECCPublicKey(X509 *x509, Sec_ECCRawPublicKey* public_key);
 
 Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
 Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
-
-Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc,
-                                 SEC_OBJECTID wrappingKey,
-                                 Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
-                                 SEC_BYTE *payload, SEC_SIZE payloadLen,
-                                 SEC_BYTE *out, SEC_SIZE out_len,
-                                 SEC_SIZE *written);
 
 Sec_Result SecUtils_WrapECCPriv(Sec_ProcessorHandle *proc,
                                 SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
@@ -306,15 +254,6 @@ Sec_Result SecUtils_WrapRawECCPriv(Sec_ProcessorHandle *proc,
 Sec_Result SecUtils_WrapRawECCPrivKeyInfo(Sec_ProcessorHandle *proc,
                                           SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
                                           const EC_KEY *keyToWrap, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written);
-
-/**
- * @brief Get the key type of the specified OpenSSL EC_GROUP
- *
- * @param EC_GROUP Group for which a key type is needed
- *
- * @return The key type or SEC_KEYTYPE_NUM if EC_GROUP is invalid
- */
-Sec_KeyType SecKey_GroupToKeyType(const EC_GROUP *group);
 
 /**
  * @brief Debugging functions
@@ -341,6 +280,49 @@ void BN_dump(const BIGNUM *bn);
 Sec_Result SecUtils_Extract_EC_KEY_X_Y(const EC_KEY *ec_key,
                                        BIGNUM **xp, BIGNUM **yp,
                                        Sec_KeyType *keyTypep);
+
+#endif
+
+/*
+ * @brief Create Digest Info structure for RSA signing from the digest
+ */
+Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE* padded_len, SEC_SIZE keySize);
+
+SEC_BOOL SecUtils_RSAIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
+
+SEC_BOOL SecUtils_ECCIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len);
+
+/**
+ * @brief Perform required padding for an RSA input data
+ */
+Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE keySize);
+
+/**
+ * @brief Checks whether the specified strings ends with the other string
+ */
+SEC_BYTE SecUtils_EndsWith(const char* str, const char* end);
+
+/**
+ * @brief obtain the index of the item in a list
+ */
+int SecUtils_ItemIndex(SEC_OBJECTID *items, SEC_SIZE numItems, SEC_OBJECTID item);
+
+/**
+ * @brief insert new item into the list if it does not exist.
+ */
+SEC_SIZE SecUtils_UpdateItemList(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_SIZE numItems, SEC_OBJECTID item_id);
+
+/**
+ * @brief insert new items into the list from the specified directory.
+ */
+SEC_SIZE SecUtils_UpdateItemListFromDir(SEC_OBJECTID *items, SEC_SIZE maxNumItems, SEC_SIZE numItems, const char* dir, const char* ext);
+
+Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc,
+                                 SEC_OBJECTID wrappingKey,
+                                 Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
+                                 SEC_BYTE *payload, SEC_SIZE payloadLen,
+                                 SEC_BYTE *out, SEC_SIZE out_len,
+                                 SEC_SIZE *written);
 
 /**
  * @brief Get the output length needed for encoding.
@@ -384,13 +366,14 @@ char* SecUtils_Epoch2IsoTime(SEC_SIZE epoch, char* iso_time, SEC_SIZE iso_time_s
 /**
  * @brief Convert the given iso time string to epoch value.
  */
-SEC_SIZE SecUtils_IsoTime2Epoch(const char* iso_time, SEC_SIZE *epoch);
+SEC_SIZE SecUtils_IsoTime2Epoch(const char* iso_time);
 
 /**
  * @brief Get the current epoch value.
  */
 SEC_SIZE SecUtils_GetUtcNow();
 
+char * SecUtils_strptime(const char *iso_time, const char* format, struct tm *tm);
 
 #ifdef __cplusplus
 }

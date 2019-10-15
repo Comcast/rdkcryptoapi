@@ -1,13 +1,18 @@
-/*
- * ============================================================================
- * COMCAST CONFIDENTIAL AND PROPRIETARY
- * ============================================================================
- * This file and its contents are the intellectual property of Comcast.  It may
- * not be used, copied, distributed or otherwise  disclosed in whole or in part
- * without the express written permission of Comcast.
- * ============================================================================
- * Copyright (c) 2013, 2014 Comcast. All rights reserved.
- * ============================================================================
+
+/**
+ * Copyright 2014 Comcast Cable Communications Management, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
 
 #ifndef SEC_SECURITY_COMCASTIDS_H_
@@ -56,6 +61,7 @@ extern "C"
 #define SEC_OBJECTID_COMCAST_PKIBUNDLE 0x0511000005110001ULL
 #define SEC_OBJECTID_COMCAST_BRCM_OTP 0x0611000006110003ULL
 #define SEC_OBJECTID_COMCAST_HASHLOCKED 0x0711000007110001ULL
+#define SEC_OBJECTID_COMCAST_SECUREDRM 0x0711000007110004ULL
 
 /* adobe object ids */
 #define SEC_OBJECTID_ADOBE_DRMMODELSGNKEY  0x0321000003254030ULL /* temp id - will change */
@@ -94,6 +100,13 @@ extern "C"
 #define SEC_OBJECTID_WV_KEY 0x0351000003510001ULL
 #define SEC_OBJECTID_WV_CERTBUNDLE 0x0651000006510001ULL
 
+#define SEC_OBJECTID_COMCAST_BRCM_DRMBIN 0x0611000006110004ULL
+
+//service manager keys
+#define SEC_OBJECTID_CW_NETFLIX_STORAGE_KEY    0x0361000003610001ULL
+#define SEC_OBJECTID_CW_YOUTUBE_STORAGE_KEY    0x0361000003610002ULL
+#define SEC_OBJECTID_CW_HLU_STORAGE_KEY    0x0361000003610003ULL
+
 #define SEC_FKPSTYPE_CERTIFICATE 0x01
 #define SEC_FKPSTYPE_CACERTIFICATE 0x02
 #define SEC_FKPSTYPE_KEYCONTAINER 0x03
@@ -102,18 +115,6 @@ extern "C"
 #define SEC_FKPSTYPE_DRMPKIBUNDLE 0x06
 #define SEC_FKPSTYPE_HASHLOCKED 0x07
 #define SEC_FKPSTYPE_RESERVED 0xFF
-
-/**
- * @brief Get the logical name that corresponds to the object_id.  Returns empty string if
- * object_id has no logical name mapping
- */
-const char* Sec_GetObjectUrn(SEC_OBJECTID object_id);
-
-/**
- * @brief Get the object id that corresponds to the urn.  Returns SEC_OBJECTID_INVALID if urn
- * is unknown
- */
-SEC_OBJECTID Sec_GetObjectId(const char* urn);
 
 #ifdef __cplusplus
 }

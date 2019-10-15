@@ -1,6 +1,6 @@
 
 /**
- * Copyright 2019 Comcast Cable Communications Management, LLC
+ * Copyright 2014 Comcast Cable Communications Management, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,13 +15,22 @@
  * limitations under the License.
  */
 
- #define _XOPEN_SOURCE
-#include <time.h>
+#ifndef SEC_SECURITY_OUTPROT_H_
+#define SEC_SECURITY_OUTPROT_H_
 
-/* put in a file by itself so _XOPEN_SOURCE does not mess with outside compile */
+#include "sec_security.h"
 
-char * SecUtils_strptime(const char *iso_time, const char* format, struct tm *tm)
+#ifdef __cplusplus
+extern "C"
 {
-    return strptime(iso_time, format, tm);
-}
+#endif
 
+Sec_Result SecOutprot_IsKeyAllowed(Sec_KeyProperties *props, Sec_KeyUsage use);
+SEC_BOOL SecOutprot_IsSVPRequired(Sec_KeyProperties *props);
+
+#ifdef __cplusplus
+}
+#endif
+
+
+#endif //SEC_SECURITY_OUTPROT_H_

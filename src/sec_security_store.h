@@ -91,13 +91,27 @@ void *SecStore_GetUserHeader(void *store);
 SEC_SIZE SecStore_GetStoreLen(void* store);
 SEC_SIZE SecStore_GetUserHeaderLen(void* store);
 SEC_SIZE SecStore_GetDataLen(void *store);
+SEC_SIZE SecStore_CalculateRequiredStoreLen(SEC_SIZE user_header_len, SEC_SIZE data_len);
 
 Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac,
         void *user_header, SEC_SIZE user_header_len,
         void *data, SEC_SIZE data_len,
         void *store, SEC_SIZE storeLen);
 
+Sec_Result SecStore_RetrieveDataWithKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID encKey, SEC_OBJECTID macGenKey, SEC_BOOL require_mac,
+        void *user_header, SEC_SIZE user_header_len,
+        void *data, SEC_SIZE data_len,
+        void *store, SEC_SIZE storeLen);
+
 Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc,
+        SEC_BOOL encrypt, SEC_BOOL gen_mac,
+        SEC_BYTE *user_header_magic, void *user_header, SEC_SIZE user_header_len,
+        void *data, SEC_SIZE data_len,
+        void *store, SEC_SIZE storeLen);
+
+Sec_Result SecStore_StoreDataWithKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID encKey, SEC_OBJECTID macGenKey,
         SEC_BOOL encrypt, SEC_BOOL gen_mac,
         SEC_BYTE *user_header_magic, void *user_header, SEC_SIZE user_header_len,
         void *data, SEC_SIZE data_len,

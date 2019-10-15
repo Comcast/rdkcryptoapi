@@ -17,6 +17,8 @@
 
 #include "sec_security.h"
 #include <stdarg.h>
+#include <string.h>
+#include <stdio.h>
 
 SecApiLogCallback g_sec_logcb = Sec_DefaultLoggerCb;
 
@@ -47,11 +49,24 @@ void Sec_NOPLoggerCb(const char *fmt, ...)
 
 void Sec_PrintHex(void* data, SEC_SIZE numBytes)
 {
+    char buffer[1024];
+    memset(buffer, 0, sizeof(buffer));
+    char* ptr = buffer;
+
+    size_t maxBytes = (sizeof(buffer) - 1)/2;
+
     SEC_BYTE* data_ptr = (SEC_BYTE *) data;
     SEC_SIZE i;
-    SEC_PRINT("0x");
 
-    for (i = 0; i < numBytes; ++i)
-        SEC_PRINT("%02x", data_ptr[i]);
+    for (i = 0; i < SEC_MIN(maxBytes, numBytes); ++i) {
+        int res = sprintf(ptr, "%02x", data_ptr[i]);
+        if (res < 0) {
+            break;
+        } else {
+            ptr += res;
+        }
+    }
+
+    SEC_PRINT(buffer);
 }
 

@@ -37,17 +37,9 @@ extern "C"
 
 #define SEC_OPENSSL_KEYCONTAINER_DERIVED SEC_KEYCONTAINER_SOC_INTERNAL_0
 
-#define SEC_OPENSSL_KEYCONTAINER_WITH_PROPS SEC_KEYCONTAINER_SOC_INTERNAL_1
-
 #define SEC_OBJECTID_OPENSSL_DERIVE_TMP SEC_OBJECTID_RESERVEDPLATFORM_0
-
-#define SEC_OBJECTID_OPENSSL_EXPORT SEC_OBJECTID_RESERVEDPLATFORM_1
-
-typedef struct {
-    SEC_BYTE c1[SEC_AES_BLOCK_SIZE];
-    SEC_BYTE derivation_input[SEC_AES_BLOCK_SIZE];
-    SEC_BYTE iv[SEC_AES_BLOCK_SIZE];
-} _Sec_ExportedHeader;
+#define SEC_OBJECTID_OPENSSL_EXPORT SEC_OBJECTID_RESERVEDPLATFORM_0
+#define SEC_OBJECTID_OPENSSL_EXPORT_MAC SEC_OBJECTID_RESERVEDPLATFORM_1
 
 typedef struct
 {
@@ -112,6 +104,12 @@ struct Sec_KeyHandle_struct
     struct Sec_ProcessorHandle_struct *proc;
 };
 
+typedef struct {
+    SEC_BYTE nonce[8];
+    uint64_t ctr;
+    size_t sub_block_offset;
+} AesCtrState;
+
 struct Sec_CipherHandle_struct
 {
     Sec_CipherAlgorithm algorithm;
@@ -119,6 +117,7 @@ struct Sec_CipherHandle_struct
     Sec_KeyHandle* key_handle;
     SEC_BOOL last;
     EVP_CIPHER_CTX *evp_ctx;
+    AesCtrState ctr_state;
     SEC_BOOL svp_required;
 };
 

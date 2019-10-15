@@ -15,9 +15,11 @@
  * limitations under the License.
  */
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
+
 #include "sec_security.h"
+#include <pthread.h>
 #include <openssl/engine.h>
-#include <openssl/crypto.h>
 
 static SEC_BOOL g_sec_openssl_inited = 0;
 
@@ -206,19 +208,19 @@ cleanup:
 
 static RSA_METHOD g_sec_openssl_rsamethod = {
         "securityapi RSA method",
-        _Sec_OpenSSLPubEncrypt,  /* rsa_pub_enc */
-        NULL,  /* rsa_pub_dec */
-        NULL, /* rsa_priv_enc */
-        _Sec_OpenSSLPrivDecrypt, /* rsa_priv_dec */
-        NULL,  /* rsa_mod_exp */
-        NULL,  /* bn_mod_exp */
-        NULL,  /* init */
-        NULL,  /* finish */
-        RSA_METHOD_FLAG_NO_CHECK | RSA_FLAG_EXT_PKEY | RSA_FLAG_SIGN_VER,  /* flags */
-        NULL,  /* app_data */
-        _Sec_OpenSSLPrivSign,  /* rsa_sign */
-        _Sec_OpenSSLPubVerify,  /* rsa_verify */
-        NULL,  /* rsa_keygen */
+        _Sec_OpenSSLPubEncrypt,  // rsa_pub_enc
+        NULL,  // rsa_pub_dec
+        NULL, // rsa_priv_enc
+        _Sec_OpenSSLPrivDecrypt, // rsa_priv_dec
+        NULL,  // rsa_mod_exp
+        NULL,  // bn_mod_exp
+        NULL,  // init
+        NULL,  // finish
+        RSA_METHOD_FLAG_NO_CHECK | RSA_FLAG_EXT_PKEY | RSA_FLAG_SIGN_VER,  // flags
+        NULL,  // app_data
+        _Sec_OpenSSLPrivSign,  // rsa_sign
+        _Sec_OpenSSLPubVerify,  // rsa_verify
+        NULL,  // rsa_keygen
 };
 
 #else
@@ -276,6 +278,10 @@ static void ENGINE_load_securityapi(void)
 
 void Sec_InitOpenSSL(void)
 {
+    static pthread_mutex_t init_openssl_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+    pthread_mutex_lock(&init_openssl_mutex);
+
     if (!g_sec_openssl_inited)
     {
         ERR_load_crypto_strings();
@@ -289,6 +295,8 @@ void Sec_InitOpenSSL(void)
 
         g_sec_openssl_inited = 1;
     }
+
+    pthread_mutex_unlock(&init_openssl_mutex);
 }
 
 void Sec_PrintOpenSSLVersion()
@@ -327,9 +335,9 @@ RSA* SecKey_ToEngineRSA(Sec_KeyHandle *key)
     rsa->n = BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL);
     rsa->e = BN_bin2bn(pubKey.e, 4, NULL);
 #else
-    RSA_set0_key(rsa, 
-        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL), 
-        BN_bin2bn(pubKey.e, 4, NULL), 
+    RSA_set0_key(rsa,
+        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL),
+        BN_bin2bn(pubKey.e, 4, NULL),
         NULL);
 #endif
 
@@ -368,9 +376,9 @@ RSA* SecKey_ToEngineRSAWithCert(Sec_KeyHandle *key, Sec_CertificateHandle *cert)
     rsa->n = BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL);
     rsa->e = BN_bin2bn(pubKey.e, 4, NULL);
 #else
-    RSA_set0_key(rsa, 
-        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL), 
-        BN_bin2bn(pubKey.e, 4, NULL), 
+    RSA_set0_key(rsa,
+        BN_bin2bn(pubKey.n, Sec_BEBytesToUint32(pubKey.modulus_len_be), NULL),
+        BN_bin2bn(pubKey.e, 4, NULL),
         NULL);
 #endif
 
@@ -406,4 +414,6 @@ X509* SecCertificate_ToX509(Sec_CertificateHandle *cert)
 
     return SecCertificate_DerToX509(exportedCert, exportedCertLen);
 }
+
+#endif
 

@@ -1,6 +1,6 @@
 
 /**
- * Copyright 2014 Comcast Cable Communications Management, LLC
+ * Copyright 2014 - 2019 Comcast Cable Communications Management, LLC
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -92,42 +92,53 @@ void Sec_Uint64ToBEBytes(uint64_t val, SEC_BYTE *bytes)
     memcpy(bytes, &val, 8);
 }
 
+// Macro that switches endianness of any stdint type.
+// Note in and out parameters must be the same stdint type.
+#define stdint_EndianSwap(in, out)\
+    uint8_t i = 0;\
+    for(; i < sizeof(in); i++)\
+    {\
+        out = (out << 8) + (in >> (i*8)&0x0ff);\
+    }\
+
 uint16_t Sec_EndianSwap_uint16(uint16_t val)
 {
-    return (val << 8) | (val >> 8);
+    uint16_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }
 
 int16_t Sec_EndianSwap_int16(int16_t val)
 {
-    return (val << 8) | ((val >> 8) & 0xFF);
+    int16_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }
 
 uint32_t Sec_EndianSwap_uint32(uint32_t val)
 {
-    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
-    return (val << 16) | (val >> 16);
+    uint32_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }
 
 int32_t Sec_EndianSwap_int32(int32_t val)
 {
-    val = ((val << 8) & 0xFF00FF00) | ((val >> 8) & 0xFF00FF);
-    return (val << 16) | ((val >> 16) & 0xFFFF);
+    int32_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }
 
 int64_t Sec_EndianSwap_int64(int64_t val)
 {
-    val = ((val << 8) & 0xFF00FF00FF00FF00ULL)
-            | ((val >> 8) & 0x00FF00FF00FF00FFULL);
-    val = ((val << 16) & 0xFFFF0000FFFF0000ULL)
-            | ((val >> 16) & 0x0000FFFF0000FFFFULL);
-    return (val << 32) | ((val >> 32) & 0xFFFFFFFFULL);
+    int64_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }
 
 uint64_t Sec_EndianSwap_uint64(uint64_t val)
 {
-    val = ((val << 8) & 0xFF00FF00FF00FF00ULL)
-            | ((val >> 8) & 0x00FF00FF00FF00FFULL);
-    val = ((val << 16) & 0xFFFF0000FFFF0000ULL)
-            | ((val >> 16) & 0x0000FFFF0000FFFFULL);
-    return (val << 32) | (val >> 32);
+    uint64_t ret = 0;
+    stdint_EndianSwap(val, ret);
+    return ret;
 }

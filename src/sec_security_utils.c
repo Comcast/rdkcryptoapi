@@ -27,16 +27,12 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
-#include <openssl/err.h>
-#include <openssl/engine.h>
-#include <openssl/evp.h>
-#include <openssl/sha.h>
-#include <openssl/hmac.h>
-#include <openssl/rand.h>
-#include <openssl/pem.h>
-#include <openssl/rsa.h>
-#include <openssl/ec.h>
-#include <openssl/aes.h>
+#include <errno.h>
+
+#if !defined(SEC_PUBOPS_TOMCRYPT)
+#include  <openssl/pem.h>
+#include  <openssl/err.h>
+#endif
 
 Sec_Result SecUtils_FillKeyStoreUserHeader(Sec_ProcessorHandle *proc,
                                            SecUtils_KeyStoreHeader *header, Sec_KeyContainer container)
@@ -188,7 +184,7 @@ static Sec_Result SecUtils_VerifyFile(const char *path, void *expected, SEC_SIZE
     Sec_Result res = SEC_RESULT_FAILURE;
 
     //allocate memory for verification
-    read = malloc(expected_len);
+    read = (SEC_BYTE *) malloc(expected_len);
     if (read == NULL) {
         SEC_LOG_ERROR("malloc failed for file: %s", path);
         goto cleanup;
@@ -247,7 +243,7 @@ Sec_Result SecUtils_WriteFile(const char *path, void *data, SEC_SIZE data_len)
     fdesc = fileno(f);
     if (fdesc < 0) {
         SEC_LOG_ERROR("fileno failed for file: %s, errno: %d", path, errno);
-        goto cleanup;        
+        goto cleanup;
     }
 
     //write contents
@@ -445,6 +441,7 @@ SEC_BOOL SecUtils_FileExists(const char *path)
     return 1;
 }
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer, SEC_SIZE buffer_len)
 {
     SEC_SIZE num_bytes;
@@ -461,7 +458,9 @@ Sec_Result SecUtils_BigNumToBuffer(const BIGNUM *bignum, SEC_BYTE *buffer, SEC_S
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromPrivBinary(Sec_RSARawPrivateKey *binary)
 {
     RSA *rsa = NULL;
@@ -478,15 +477,17 @@ RSA *SecUtils_RSAFromPrivBinary(Sec_RSARawPrivateKey *binary)
     rsa->e = BN_bin2bn(binary->e, 4, NULL);
     rsa->d = BN_bin2bn(binary->d, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
 #else
-    RSA_set0_key(rsa, 
-        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL), 
-        BN_bin2bn(binary->e, 4, NULL), 
+    RSA_set0_key(rsa,
+        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL),
+        BN_bin2bn(binary->e, 4, NULL),
         BN_bin2bn(binary->d, Sec_BEBytesToUint32(binary->modulus_len_be), NULL));
 #endif
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromPrivFullBinary(Sec_RSARawPrivateFullKey *binary)
 {
     RSA *rsa = NULL;
@@ -525,13 +526,13 @@ RSA *SecUtils_RSAFromPrivFullBinary(Sec_RSARawPrivateFullKey *binary)
     BN_mod_inverse(rsa->iqmp, rsa->q, rsa->p, ctx);
 
 #else
-    RSA_set0_key(rsa, 
-        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL), 
-        BN_bin2bn(binary->e, 4, NULL), 
+    RSA_set0_key(rsa,
+        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL),
+        BN_bin2bn(binary->e, 4, NULL),
         d);
 
-    RSA_set0_factors(rsa, 
-        p, 
+    RSA_set0_factors(rsa,
+        p,
         q);
 
     BIGNUM *dmp1 = BN_new();
@@ -552,7 +553,9 @@ RSA *SecUtils_RSAFromPrivFullBinary(Sec_RSARawPrivateFullKey *binary)
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromPubBinary(Sec_RSARawPublicKey *binary)
 {
     RSA *rsa = NULL;
@@ -568,15 +571,17 @@ RSA *SecUtils_RSAFromPubBinary(Sec_RSARawPublicKey *binary)
     rsa->n = BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL);
     rsa->e = BN_bin2bn(binary->e, 4, NULL);
 #else
-    RSA_set0_key(rsa, 
-        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL), 
-        BN_bin2bn(binary->e, 4, NULL), 
+    RSA_set0_key(rsa,
+        BN_bin2bn(binary->n, Sec_BEBytesToUint32(binary->modulus_len_be), NULL),
+        BN_bin2bn(binary->e, 4, NULL),
         NULL);
 #endif
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromDERPriv(SEC_BYTE *der, SEC_SIZE der_len)
 {
     const unsigned char *p = (const unsigned char *) der;
@@ -621,12 +626,16 @@ done:
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 static int _Sec_DisablePassphrasePrompt(char *buf, int size, int rwflag, void *u)
 {
     return 0;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromPEMPriv(SEC_BYTE *pem, SEC_SIZE pem_len)
 {
     BIO *bio = NULL;
@@ -646,7 +655,9 @@ done:
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromDERPub(SEC_BYTE *der, SEC_SIZE der_len)
 {
     const unsigned char *p = (const unsigned char *) der;
@@ -669,7 +680,9 @@ RSA *SecUtils_RSAFromDERPub(SEC_BYTE *der, SEC_SIZE der_len)
 done:
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA *SecUtils_RSAFromPEMPub(SEC_BYTE *pem, SEC_SIZE pem_len)
 {
     BIO *bio = NULL;
@@ -689,7 +702,9 @@ done:
 
     return rsa;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 void SecUtils_RSAToPrivBinary(RSA *rsa, Sec_RSARawPrivateKey *binary)
 {
     Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
@@ -708,7 +723,9 @@ void SecUtils_RSAToPrivBinary(RSA *rsa, Sec_RSARawPrivateKey *binary)
     SecUtils_BigNumToBuffer((BIGNUM *) d, binary->d, Sec_BEBytesToUint32(binary->modulus_len_be));
 #endif
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 void SecUtils_RSAToPrivFullBinary(RSA *rsa, Sec_RSARawPrivateFullKey *binary)
 {
     Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
@@ -733,7 +750,9 @@ void SecUtils_RSAToPrivFullBinary(RSA *rsa, Sec_RSARawPrivateFullKey *binary)
     SecUtils_BigNumToBuffer((BIGNUM *) q, binary->q, Sec_BEBytesToUint32(binary->modulus_len_be));
 #endif
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 void SecUtils_RSAToPubBinary(RSA *rsa, Sec_RSARawPublicKey *binary)
 {
     Sec_Uint32ToBEBytes(RSA_size(rsa), binary->modulus_len_be);
@@ -749,7 +768,9 @@ void SecUtils_RSAToPubBinary(RSA *rsa, Sec_RSARawPublicKey *binary)
     SecUtils_BigNumToBuffer((BIGNUM *) e, binary->e, 4);
 #endif
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_PKEYToDERPriv(EVP_PKEY *evp_key, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
 {
     BIO *bio = NULL;
@@ -791,7 +812,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_RSAToDERPriv(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
 {
     EVP_PKEY *evp_key = NULL;
@@ -817,7 +840,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_RSAToDERPrivKeyInfo(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
 {
     BIO *bio = NULL;
@@ -870,7 +895,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_RSAToDERPubKey(RSA *rsa, SEC_BYTE *output, SEC_SIZE out_len, SEC_SIZE *written)
 {
     BIO *bio = NULL;
@@ -921,7 +948,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 SEC_BOOL SecUtils_RSAHasPriv(RSA *rsa)
 {
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
@@ -933,13 +962,14 @@ SEC_BOOL SecUtils_RSAHasPriv(RSA *rsa)
     return d != NULL;
 #endif
 }
+#endif
 
-
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 SEC_BOOL SecUtils_ECCHasPriv(EC_KEY *ec_key)
 {
     return EC_KEY_get0_private_key(ec_key) != NULL;
 }
-
+#endif
 
 SEC_BOOL SecUtils_RSAIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len)
 {
@@ -964,9 +994,10 @@ SEC_BOOL SecUtils_RSAIsClearKC(Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE dat
     || (kc == SEC_KEYCONTAINER_STORE
         && data_len >= sizeof(SecStore_Header)
                     && data_len >= (sizeof(SecStore_Header) + SecStore_GetUserHeaderLen(data))
-                    && SecUtils_RSAIsClearKC(SecUtils_GetKeyStoreUserHeader(data)->inner_kc_type, data, data_len));
+                    && SecUtils_RSAIsClearKC((Sec_KeyContainer) SecUtils_GetKeyStoreUserHeader(data)->inner_kc_type, data, data_len));
 }
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 RSA* SecUtils_RSAFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC_BYTE *data, SEC_SIZE data_len)
 {
     RSA *rsa = NULL;
@@ -1058,6 +1089,7 @@ RSA* SecUtils_RSAFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc, SEC
 
 done: return rsa;
 }
+#endif
 
 
 SEC_BOOL SecUtils_ECCIsClearKC(Sec_KeyContainer kc,
@@ -1073,10 +1105,11 @@ SEC_BOOL SecUtils_ECCIsClearKC(Sec_KeyContainer kc,
     || (kc == SEC_KEYCONTAINER_STORE
         && data_len >= sizeof(SecStore_Header)
         && data_len >= (sizeof(SecStore_Header) + SecStore_GetUserHeaderLen(data))
-        && SecUtils_ECCIsClearKC(SecUtils_GetKeyStoreUserHeader(data)->inner_kc_type,
+        && SecUtils_ECCIsClearKC((Sec_KeyContainer) SecUtils_GetKeyStoreUserHeader(data)->inner_kc_type,
                                  data, data_len));
 }
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 EC_KEY* SecUtils_ECCFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc,
                                 SEC_BYTE *data, SEC_SIZE data_len)
 { //$$$ could add SEC_KEYCONTAINER_RAW_ECC_PRIVONLY_NISTP256
@@ -1189,8 +1222,10 @@ EC_KEY* SecUtils_ECCFromClearKC(Sec_ProcessorHandle *proc, Sec_KeyContainer kc,
 
 done: return ec_key;
 }
+#endif
 
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // $$$ Expand for more support private key types (not public types, because
 // $$$ they won't have a private key)
 EC_KEY *SecUtils_ECCFromOnlyPrivBinary(Sec_ECCRawOnlyPrivateKey *binary)
@@ -1260,7 +1295,9 @@ EC_KEY *SecUtils_ECCFromOnlyPrivBinary(Sec_ECCRawOnlyPrivateKey *binary)
 
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Precondition: binary->type must have been verified as a supported value.
 // $$$ Expand for more support private key types (not public types, because
 // $$$ they won't have a private key)
@@ -1270,8 +1307,10 @@ EC_KEY *SecUtils_ECCFromPrivBinary(Sec_ECCRawPrivateKey *binary)
 
     // Note that SEC_KEYTYPE_ECC_NISTP256_PUBLIC is not acceptable,
     // because it won't have a private key value
-    if (binary->type != SEC_KEYTYPE_ECC_NISTP256)
+    if (binary->type != SEC_KEYTYPE_ECC_NISTP256) {
+        SEC_LOG_ERROR("invalid key type");
         return NULL;
+    }
 
     EC_KEY *ec_key = EC_KEY_new_by_curve_name(NID_X9_62_prime256v1); //create ec_key structure with NIST p256 curve;
     const EC_GROUP *group = EC_KEY_get0_group(ec_key);
@@ -1279,8 +1318,11 @@ EC_KEY *SecUtils_ECCFromPrivBinary(Sec_ECCRawPrivateKey *binary)
     BN_CTX_start(ctx);
     BIGNUM *xp, *yp, *prvp;
     if (((xp = BN_CTX_get(ctx)) == NULL) || ((yp = BN_CTX_get(ctx)) == NULL)
-        || ((prvp = BN_CTX_get(ctx)) == NULL))
+        || ((prvp = BN_CTX_get(ctx)) == NULL)) {
+
+        SEC_LOG_ERROR("BN_CTX_get failed");
         goto done;
+    }
 
     EC_POINT_set_affine_coordinates_GFp(group, ec_point,
                                         BN_bin2bn(binary->x, Sec_BEBytesToUint32(binary->key_len), xp),
@@ -1297,7 +1339,9 @@ done:
 
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Precondition: binary->type must have been verified as a supported value
 // $$$ expand for more support key types
 EC_KEY *SecUtils_ECCFromPubBinary(Sec_ECCRawPublicKey *binary)
@@ -1329,7 +1373,9 @@ done:
 
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_ECCToPrivBinary(EC_KEY *ec_key, Sec_ECCRawPrivateKey *binary)
 {
     BIGNUM *x = NULL;
@@ -1343,7 +1389,11 @@ Sec_Result SecUtils_ECCToPrivBinary(EC_KEY *ec_key, Sec_ECCRawPrivateKey *binary
     }
     else
     {
-        binary->type = keyType;
+        if (keyType != SEC_KEYTYPE_ECC_NISTP256_PUBLIC) {
+            SEC_LOG_ERROR("Unexpected key type encountered: %d", keyType);
+            return SEC_RESULT_FAILURE;
+        }
+        binary->type = SEC_KEYTYPE_ECC_NISTP256;
         Sec_Uint32ToBEBytes(SecKey_GetKeyLenForKeyType(keyType), binary->key_len);
         SecUtils_BigNumToBuffer((BIGNUM *) EC_KEY_get0_private_key(ec_key), binary->prv, Sec_BEBytesToUint32(binary->key_len));
         SecUtils_BigNumToBuffer(x, binary->x, Sec_BEBytesToUint32(binary->key_len));
@@ -1354,14 +1404,15 @@ Sec_Result SecUtils_ECCToPrivBinary(EC_KEY *ec_key, Sec_ECCRawPrivateKey *binary
         return SEC_RESULT_SUCCESS;
     }
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_ECCToPubBinary(EC_KEY *ec_key, Sec_ECCRawPublicKey *binary)
 {
     BIGNUM *x = NULL;
     BIGNUM *y = NULL;
-    Sec_KeyType keyType;
 
-    if (SecUtils_Extract_EC_KEY_X_Y(ec_key, &x, &y, &keyType) != SEC_RESULT_SUCCESS)
+    if (SecUtils_Extract_EC_KEY_X_Y(ec_key, &x, &y, NULL) != SEC_RESULT_SUCCESS)
     {
 
         SEC_LOG_ERROR("SecUtils_ECCToPubBinary: SecUtils_Extract_EC_KEY_X_Y failed");
@@ -1369,8 +1420,8 @@ Sec_Result SecUtils_ECCToPubBinary(EC_KEY *ec_key, Sec_ECCRawPublicKey *binary)
     }
     else
     {
-        binary->type = keyType;
-        Sec_Uint32ToBEBytes(SecKey_GetKeyLenForKeyType(keyType), binary->key_len);
+        binary->type = SEC_KEYTYPE_ECC_NISTP256_PUBLIC;
+        Sec_Uint32ToBEBytes(SecKey_GetKeyLenForKeyType(binary->type), binary->key_len);
         SecUtils_BigNumToBuffer(x, binary->x, Sec_BEBytesToUint32(binary->key_len));
         SecUtils_BigNumToBuffer(y, binary->y, Sec_BEBytesToUint32(binary->key_len));
 
@@ -1379,7 +1430,9 @@ Sec_Result SecUtils_ECCToPubBinary(EC_KEY *ec_key, Sec_ECCRawPublicKey *binary)
         return SEC_RESULT_SUCCESS;
     }
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 EC_KEY *SecUtils_ECCFromDERPriv(SEC_BYTE *der, SEC_SIZE der_len)
 {
     const unsigned char *p = (const unsigned char *) der;
@@ -1424,7 +1477,9 @@ done:
 
     return ecc;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 EC_KEY *SecUtils_ECCFromPEMPriv(SEC_BYTE *pem, SEC_SIZE pem_len)
 {
     BIO *bio = NULL;
@@ -1444,7 +1499,9 @@ done:
 
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 EC_KEY *SecUtils_ECCFromDERPub(SEC_BYTE *der, SEC_SIZE der_len)
 {
     const unsigned char *p = (const unsigned char *) der;
@@ -1461,7 +1518,9 @@ EC_KEY *SecUtils_ECCFromDERPub(SEC_BYTE *der, SEC_SIZE der_len)
 done:
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 EC_KEY *SecUtils_ECCFromPEMPub(SEC_BYTE *pem, SEC_SIZE pem_len)
 {
     BIO *bio = NULL;
@@ -1481,7 +1540,9 @@ done:
 
     return ec_key;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_ECCToDERPriv(EC_KEY *ec_key, SEC_BYTE *output,
                                  SEC_SIZE out_len, SEC_SIZE *written)
 {
@@ -1509,7 +1570,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_ECCToDERPrivKeyInfo(EC_KEY *ec_key, SEC_BYTE *output,
                                         SEC_SIZE out_len, SEC_SIZE *written)
 {
@@ -1563,7 +1626,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_ECCToDERPubKey(EC_KEY *ec_key, SEC_BYTE *output, SEC_SIZE out_len,
                                    SEC_SIZE *written)
 {
@@ -1615,7 +1680,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem)
 {
     int written = 0;
@@ -1625,7 +1692,9 @@ SEC_SIZE SecUtils_X509ToDer(X509 *x509, void *mem)
         return 0;
     return written;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 X509 * SecUtils_DerToX509(SEC_BYTE *der, SEC_SIZE der_len) {
 	BIO *bio = NULL;
 	X509 *x509 = NULL;
@@ -1640,7 +1709,9 @@ X509 * SecUtils_DerToX509(SEC_BYTE *der, SEC_SIZE der_len) {
 
     return x509;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 SEC_SIZE SecUtils_X509ToDerLen(X509 *x509, void *mem, SEC_SIZE mem_len)
 {
     int written = 0;
@@ -1662,7 +1733,9 @@ SEC_SIZE SecUtils_X509ToDerLen(X509 *x509, void *mem, SEC_SIZE mem_len)
 
     return written;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_VerifyX509WithRawRSAPublicKey(X509 *x509,
                                                   Sec_RSARawPublicKey* public_key)
 {
@@ -1705,7 +1778,9 @@ error: if (rsa != NULL)
 
     return SEC_RESULT_FAILURE;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_VerifyX509WithRawECCPublicKey(X509 *x509,
                                                   Sec_ECCRawPublicKey* public_key)
 {
@@ -1747,165 +1822,73 @@ error:
 
     return SEC_RESULT_FAILURE;
 }
+#endif
 
-#define GETU32(pt) (((uint32_t)(pt)[0] << 24) ^ ((uint32_t)(pt)[1] << 16) ^ ((uint32_t)(pt)[2] <<  8) ^ ((uint32_t)(pt)[3]))
-#define PUTU32(ct, st) { (ct)[0] = (uint8_t)((st) >> 24); (ct)[1] = (uint8_t)((st) >> 16); (ct)[2] = (uint8_t)((st) >>  8); (ct)[3] = (uint8_t)(st); }
+Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE* padded_len, SEC_SIZE keySize) {
+    const SEC_BYTE SHA1_PREFIX[] = { 0x30, 0x21, 0x30, 0x09, 0x06, 0x05, 0x2b, 0x0e, 0x03, 0x02, 0x1a, 0x05, 0x00, 0x04, 0x14 };
+    const SEC_BYTE SHA256_PREFIX[] = { 0x30, 0x31, 0x30, 0x0d, 0x06, 0x09, 0x60, 0x86, 0x48, 0x01, 0x65, 0x03, 0x04, 0x02, 0x01, 0x05, 0x00, 0x04, 0x20 };
 
-void SecUtils_AesCtrInc(SEC_BYTE *counter)
-{
-    unsigned long c;
+    if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
+        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST)
+    {
+        if (digest_len != 20) {
+            SEC_LOG_ERROR("Invalid digest len");
+            return SEC_RESULT_FAILURE;
+        }
 
-    /* Grab bottom dword of counter and increment */
-    c = GETU32(counter + 12);
-    c++;
-    c &= 0xFFFFFFFF;
-    PUTU32(counter + 12, c);
+        memcpy(padded, SHA1_PREFIX, sizeof(SHA1_PREFIX));
+        memcpy(padded + sizeof(SHA1_PREFIX), digest, digest_len);
 
-    /* if no overflow, we're done */
-    if (c)
-        return;
+        *padded_len = sizeof(SHA1_PREFIX) + digest_len;
 
-    /* Grab 1st dword of counter and increment */
-    c = GETU32(counter + 8);
-    c++;
-    c &= 0xFFFFFFFF;
-    PUTU32(counter + 8, c);
+        return SEC_RESULT_SUCCESS;
+    }
+    else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
+             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST)
+    {
+        if (digest_len != 32) {
+            SEC_LOG_ERROR("Invalid digest len");
+            return SEC_RESULT_FAILURE;
+        }
 
-    /* if no overflow, we're done */
-    if (c)
-        return;
+        memcpy(padded, SHA256_PREFIX, sizeof(SHA256_PREFIX));
+        memcpy(padded + sizeof(SHA256_PREFIX), digest, digest_len);
 
-    /* Grab 2nd dword of counter and increment */
-    c = GETU32(counter + 4);
-    c++;
-    c &= 0xFFFFFFFF;
-    PUTU32(counter + 4, c);
+        *padded_len = sizeof(SHA256_PREFIX) + digest_len;
 
-    /* if no overflow, we're done */
-    if (c)
-        return;
-
-    /* Grab top dword of counter and increment */
-    c = GETU32(counter + 0);
-    c++;
-    c &= 0xFFFFFFFF;
-    PUTU32(counter + 0, c);
+        return SEC_RESULT_SUCCESS;
+    }
+    else
+    {
+        SEC_LOG_ERROR("Unknown signature algorithm");
+        return SEC_RESULT_FAILURE;
+    }
 }
 
-Sec_Result SecUtils_DigestInfoForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE* padded_len, SEC_SIZE keySize)
-{
-#if OPENSSL_VERSION_NUMBER < 0x10100000L
-    X509_SIG sig;
-    ASN1_TYPE parameter;
-    SEC_BYTE *p = NULL;
-    X509_ALGOR algor;
-    ASN1_OCTET_STRING digest_str;
-    int type;
-
-    if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST)
-    {
-        type = NID_sha1;
-    }
-    else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST)
-    {
-        type = NID_sha256;
-    }
-    else
-    {
-        SEC_LOG_ERROR("Unknown signature algorithm");
+#define _RSA_PKCS1_PAD_SIZE   11
+static Sec_Result _ApplyPKCS15Pad(SEC_BYTE *input, SEC_SIZE in_len, SEC_BYTE *output, SEC_SIZE out_len) {
+    if (in_len > (out_len - _RSA_PKCS1_PAD_SIZE)) {
+        SEC_LOG_ERROR("output is not large enough");
         return SEC_RESULT_FAILURE;
     }
 
-    sig.algor = &algor;
-    sig.algor->algorithm = OBJ_nid2obj(type);
+    SEC_BYTE *p = input;
+    *(p++) = 0;
+    *(p++) = 1;  //block type
 
-    if (sig.algor->algorithm == NULL)
-    {
-        SEC_LOG_ERROR("Unknown algorithm type");
-        return SEC_RESULT_FAILURE;
+    SEC_SIZE i;
+    for (i=0; i<(out_len - 3 - in_len); ++i) {
+        *(p++) = 0xff;
     }
+    *(p++) = 0;
 
-    if (sig.algor->algorithm->length == 0)
-    {
-        SEC_LOG_ERROR("Unknown object identifier");
-        return SEC_RESULT_FAILURE;
-    }
-
-    parameter.type = V_ASN1_NULL;
-    parameter.value.ptr = NULL;
-    sig.algor->parameter = &parameter;
-
-    sig.digest = &digest_str;
-    sig.digest->data = (SEC_BYTE *) digest;
-    sig.digest->length = digest_len;
-
-    *padded_len = i2d_X509_SIG(&sig, NULL);
-    if (*padded_len > (keySize - RSA_PKCS1_PADDING_SIZE))
-    {
-        SEC_LOG_ERROR("Digest is too large");
-        return SEC_RESULT_FAILURE;
-    }
-    p = padded;
-    i2d_X509_SIG(&sig, &p);
+    memcpy(p, input, in_len);
 
     return SEC_RESULT_SUCCESS;
-#else
-    X509_SIG *sig = X509_SIG_new();
-    X509_ALGOR *algor = NULL;
-    ASN1_OCTET_STRING *odigest = NULL;
-    SEC_BYTE *p = NULL;
-    X509_SIG_getm(sig, &algor, &odigest);
-
-
-
-
-/*
-    ASN1_TYPE parameter;
-    X509_ALGOR algor;
-    ASN1_OCTET_STRING digest_str;
-    */
-
-    if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
-        || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST)
-    {
-        X509_ALGOR_set_md(algor, EVP_sha1());
-    }
-    else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS
-             || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST)
-    {
-        X509_ALGOR_set_md(algor, EVP_sha256());
-    }
-    else
-    {
-        SEC_LOG_ERROR("Unknown signature algorithm");
-        return SEC_RESULT_FAILURE;
-    }
-
-    if (!ASN1_OCTET_STRING_set(odigest, digest, digest_len)) {
-        return SEC_RESULT_FAILURE;
-    }
-
-    *padded_len = i2d_X509_SIG(sig, NULL);
-    if (*padded_len > (keySize - RSA_PKCS1_PADDING_SIZE))
-    {
-        SEC_LOG_ERROR("Digest is too large");
-        return SEC_RESULT_FAILURE;
-    }
-    p = padded;
-    i2d_X509_SIG(sig, &p);
-
-    return SEC_RESULT_SUCCESS;
-#endif
 }
 
 Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *padded, SEC_SIZE keySize)
@@ -1924,10 +1907,8 @@ Sec_Result SecUtils_PadForRSASign(Sec_SignatureAlgorithm alg, SEC_BYTE *digest, 
         || alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST
         || alg == SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST) {
 
-        if (!RSA_padding_add_PKCS1_type_1((SEC_BYTE *) padded, keySize,
-                                          (SEC_BYTE *) temp_padded, temp_padded_len))
-        {
-            SEC_LOG_ERROR("RSA_padding_add_PKCS1_type_1 failed");
+        if (SEC_RESULT_SUCCESS != _ApplyPKCS15Pad(temp_padded, temp_padded_len, padded, keySize)) {
+            SEC_LOG_ERROR("_ApplyPKCS15Pad failed");
             return SEC_RESULT_FAILURE;
         }
     } else if (alg == SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS
@@ -2052,7 +2033,7 @@ SEC_SIZE SecUtils_BitmapGetFirst(SEC_BYTE *bitmap, SEC_SIZE num_bytes, SEC_BOOL 
     return (SEC_SIZE) -1;
 }
 
-
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written)
 {
     SEC_BYTE pkcs8[SEC_KEYCONTAINER_MAX_LEN];
@@ -2074,7 +2055,9 @@ Sec_Result SecUtils_WrapRSAPriv(Sec_ProcessorHandle *proc, SEC_OBJECTID wrapping
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv, RSA *wrappedKey, SEC_BYTE *out, SEC_SIZE out_len, SEC_SIZE *written)
 {
     SEC_BYTE pkcs8[SEC_KEYCONTAINER_MAX_LEN];
@@ -2096,6 +2079,7 @@ Sec_Result SecUtils_WrapRSAPrivKeyInfo(Sec_ProcessorHandle *proc, SEC_OBJECTID w
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
 Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc,
                                  SEC_OBJECTID wrappingKey,
@@ -2115,6 +2099,7 @@ Sec_Result SecUtils_WrapSymetric(Sec_ProcessorHandle *proc,
     return SEC_RESULT_SUCCESS;
 }
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Wrap an ECC key inside a PKCS#8 DER wrapper
 // For some background, see
 // http://security.stackexchange.com/questions/84327/converting-ecc-private-key-to-pkcs1-format
@@ -2145,7 +2130,9 @@ Sec_Result SecUtils_WrapECCPriv(Sec_ProcessorHandle *proc,
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Wrap an ECC key info inside a PKCS#8 DER wrapper
 Sec_Result SecUtils_WrapECCPrivKeyInfo(Sec_ProcessorHandle *proc,
                                      SEC_OBJECTID wrappingKey, Sec_CipherAlgorithm wrappingAlg, SEC_BYTE *iv,
@@ -2173,7 +2160,9 @@ Sec_Result SecUtils_WrapECCPrivKeyInfo(Sec_ProcessorHandle *proc,
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Wrap an raw ECC key
 //
 Sec_Result SecUtils_WrapRawECCPriv(Sec_ProcessorHandle *proc,
@@ -2199,7 +2188,9 @@ Sec_Result SecUtils_WrapRawECCPriv(Sec_ProcessorHandle *proc,
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // Wrap an ECC key inside a Sec_ECCRawPrivateKey
 //$$$ Note that this is identical to SecUtils_WrapRawECCPriv
 Sec_Result SecUtils_WrapRawECCPrivKeyInfo(Sec_ProcessorHandle *proc,
@@ -2225,33 +2216,9 @@ Sec_Result SecUtils_WrapRawECCPrivKeyInfo(Sec_ProcessorHandle *proc,
 
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
-
-/**
- * @brief Get the key type of the specified OpenSSL EC_GROUP
- *
- * $$$ If we handle more groups, then add more cases.
- *
- * Note that NID_secp256k1 is *not* SEC_KEYTYPE_ECC_NISTP256.
- *
- * @param EC_GROUP Group for which a key type is needed
- *
- * @return The key type or SEC_KEYTYPE_NUM if EC_GROUP is invalid
- */
-Sec_KeyType SecKey_GroupToKeyType(const EC_GROUP *group)
-{
-    if (NULL == group)
-        return SEC_KEYTYPE_NUM;
-    switch (EC_GROUP_get_curve_name(group))
-    {
-        case NID_X9_62_prime256v1:
-            return SEC_KEYTYPE_ECC_NISTP256;
-        case 0:
-        default:
-            return SEC_KEYTYPE_NUM;
-    }
-}
-
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // ec_key is the other side's public ECC key
 //
 // Returns the number of bytes in the encrypted output or
@@ -2286,7 +2253,7 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key,
         goto done;
     }
 
-    /* Convert the input buffer to be encrypted to a BIGNUM */
+    // Convert the input buffer to be encrypted to a BIGNUM
     inputAsBN = BN_new();
     if (inputAsBN == NULL)
     {
@@ -2334,7 +2301,7 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key,
         goto done;
     }
 
-    /* Calc sender's shared point 'wP' => this gets sent back to receiver */
+    // Calc sender's shared point 'wP' => this gets sent back to receiver
     sender_share = EC_POINT_new(group);
     if (sender_share == NULL)
     {
@@ -2350,17 +2317,7 @@ int SecUtils_ElGamal_Encrypt_Rand(EC_KEY *ec_key,
     }
     EC_POINT_mul(group, sender_share, NULL, P, sender_rand, ctx);
 
-    /******
-     // Calling EC_POINT_is_on_curve is not necessary if we used
-     // EC_POINT_set_compressed_coordinates_GFp to get the point,
-     // so skipping the following call:
-     if (!EC_POINT_is_on_curve(group, key_2_wrap_point, ctx)) {
-         SEC_PRINT(" -EG-Error: key_2_wrap_point not in curve");
-         ...
-     }
-     *******/
-
-    ///* Calc sender's Shared Secret 'wRr'  => this hides the key I want to send */
+    // Calc sender's Shared Secret 'wRr'  => this hides the key I want to send
     shared_secret = EC_POINT_new(group);
     if (shared_secret == NULL)
     {
@@ -2449,7 +2406,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // ec_key is the other side's public ECC key
 //
 // Returns the number of bytes in the encrypted output or
@@ -2458,20 +2417,20 @@ int SecUtils_ElGamal_Encrypt(EC_KEY *ec_key,
                              SEC_BYTE* input, SEC_SIZE inputSize,
                              SEC_BYTE* output, SEC_SIZE outputSize)
 {
-    /* Generate random number 'w' (multiplier) for the sender */
+    // Generate random number 'w' (multiplier) for the sender
     BIGNUM *sender_rand = BN_new();
 
     if (sender_rand == NULL)
     {
         SEC_LOG_ERROR("BN_new failed");
-        return SEC_RESULT_FAILURE;
+        return -1;
     }
     if (0 == BN_rand(sender_rand, 256, -1, 0))
     {
         SEC_LOG_ERROR("BN_rand failed");
         if (NULL != sender_rand)
             BN_free(sender_rand);
-        return SEC_RESULT_FAILURE;
+        return -1;
     }
 
     return SecUtils_ElGamal_Encrypt_Rand(ec_key,
@@ -2479,7 +2438,9 @@ int SecUtils_ElGamal_Encrypt(EC_KEY *ec_key,
                                          output, outputSize,
                                          sender_rand);
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 // ec_key is our private ECC key
 // Returns the number of bytes in the encrypted output or
 // -1 if there was an error
@@ -2624,7 +2585,7 @@ int SecUtils_ElGamal_Decrypt(EC_KEY *ec_key, SEC_BYTE* input,
     EC_POINT_add(group, wrapped_point, wrapped_key, shared_secret, ctx);
 
     // Extract just the X coordinate from wrapped_point
-    EC_POINT_get_affine_coordinates_GFp(group, wrapped_point, x, /*y=*/NULL,
+    EC_POINT_get_affine_coordinates_GFp(group, wrapped_point, x, NULL,
                                         ctx);
 
     if (SEC_RESULT_SUCCESS != SecUtils_BigNumToBuffer(x, output, SEC_ECC_NISTP256_KEY_LEN)) {
@@ -2651,7 +2612,9 @@ done:
 
     return res;
 }
+#endif
 
+#if !defined(SEC_PUBOPS_TOMCRYPT)
 /*
  * The next steps a caller might take are:
  * SecUtils_BigNumToBuffer(x, public_key->x, Sec_BEBytesToUint32(public_key->key_len));
@@ -2710,7 +2673,7 @@ Sec_Result SecUtils_Extract_EC_KEY_X_Y(const EC_KEY *ec_key, BIGNUM **xp, BIGNUM
 
     if (NULL != keyTypep) // if caller wants key type returned
     {
-        *keyTypep = SecKey_GroupToKeyType(group);
+        *keyTypep = SEC_KEYTYPE_ECC_NISTP256_PUBLIC;
     }
 
     // Get the X coordinate and optionally the Y coordinate
@@ -2736,3 +2699,4 @@ error:
 
     return res;
 }
+#endif

@@ -16,9 +16,9 @@
  */
 
 #include "sec_security_store.h"
+#include "sec_pubops.h"
 #include <string.h>
-#include <openssl/hmac.h>
-#include <openssl/sha.h>
+#include <stdlib.h>
 
 #define SEC_STORE_MAC_KEY_INPUT "securestore" "integrity" "hmacSha256" "aes128ecb" "decrypt"
 
@@ -112,6 +112,10 @@ static SEC_SIZE SecStore_CalculateStoreLen(SEC_SIZE header_len, SEC_SIZE data_le
     return header_len + SecStore_CalculatePaddedDataLen(data_len) + SEC_STORE_MAC_LEN + SEC_STORE_IV_LEN;
 }
 
+SEC_SIZE SecStore_CalculateRequiredStoreLen(SEC_SIZE user_header_len, SEC_SIZE data_len) {
+    return sizeof(SecStore_Header) + user_header_len + SecStore_CalculatePaddedDataLen(data_len) + SEC_STORE_MAC_LEN + SEC_STORE_IV_LEN;
+}
+
 SEC_SIZE SecStore_GetStoreLen(void* store)
 {
     return SecStore_CalculateStoreLen(SecStore_GetHeaderLen(store), SecStore_GetDataLen(store));
@@ -137,7 +141,7 @@ static SEC_BYTE *SecStore_GetData(void *store)
     return ((SEC_BYTE*) store) + SecStore_GetHeaderLen(store);
 }
 
-static Sec_Result SecStore_ComputeMacKey(Sec_ProcessorHandle *proc, const char* input, SEC_BYTE *key, SEC_SIZE key_len)
+static Sec_Result SecStore_ComputeMacKey(Sec_ProcessorHandle *proc, SEC_OBJECTID keyId, const char* input, SEC_BYTE *key, SEC_SIZE key_len)
 {
     SEC_SIZE digest_len;
     SEC_SIZE written;
@@ -155,19 +159,17 @@ static Sec_Result SecStore_ComputeMacKey(Sec_ProcessorHandle *proc, const char* 
     }
 
     if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc, SEC_CIPHERALGORITHM_AES_ECB_NO_PADDING,
-            SEC_CIPHERMODE_DECRYPT, SEC_OBJECTID_STORE_MACKEYGEN_KEY, NULL, key, key_len,
+            SEC_CIPHERMODE_DECRYPT, keyId, NULL, key, key_len,
             key, key_len, &written))
     {
         SEC_LOG_ERROR("SecCipher_SingleInputId failed");
         return SEC_RESULT_FAILURE;
     }
 
-//    SEC_PRINT("mac key: "); Sec_PrintHex(key, key_len); SEC_PRINT("\n");
-
     return SEC_RESULT_SUCCESS;
 }
 
-static Sec_Result SecStore_Encrypt(Sec_ProcessorHandle *proc, void *store, SEC_SIZE storeLen)
+static Sec_Result SecStore_Encrypt(Sec_ProcessorHandle *proc, SEC_OBJECTID keyId, void *store, SEC_SIZE storeLen)
 {
     SEC_SIZE expected_enc_data_len;
     SEC_SIZE written;
@@ -199,7 +201,7 @@ static Sec_Result SecStore_Encrypt(Sec_ProcessorHandle *proc, void *store, SEC_S
     expected_enc_data_len = SecStore_GetPaddedDataLen(store) + SEC_STORE_MAC_LEN;
 
     if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc, SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING,
-            SEC_CIPHERMODE_ENCRYPT, SEC_OBJECTID_STORE_AES_KEY,
+            SEC_CIPHERMODE_ENCRYPT, keyId,
             SecStore_GetIV(store),
             SecStore_GetData(store), expected_enc_data_len,
             SecStore_GetData(store), expected_enc_data_len,
@@ -218,7 +220,7 @@ static Sec_Result SecStore_Encrypt(Sec_ProcessorHandle *proc, void *store, SEC_S
     return SEC_RESULT_SUCCESS;
 }
 
-static Sec_Result SecStore_Decrypt(Sec_ProcessorHandle *proc, void *store, SEC_SIZE storeLen)
+static Sec_Result SecStore_Decrypt(Sec_ProcessorHandle *proc, SEC_OBJECTID keyId, void *store, SEC_SIZE storeLen)
 {
     SEC_SIZE expected_enc_data_len;
     SEC_SIZE written;
@@ -244,7 +246,7 @@ static Sec_Result SecStore_Decrypt(Sec_ProcessorHandle *proc, void *store, SEC_S
     expected_enc_data_len = SecStore_GetPaddedDataLen(store) + SEC_STORE_MAC_LEN;
 
     if (SEC_RESULT_SUCCESS != SecCipher_SingleInputId(proc, SEC_CIPHERALGORITHM_AES_CBC_NO_PADDING,
-            SEC_CIPHERMODE_DECRYPT, SEC_OBJECTID_STORE_AES_KEY,
+            SEC_CIPHERMODE_DECRYPT, keyId,
             SecStore_GetIV(store),
             SecStore_GetData(store), expected_enc_data_len,
             SecStore_GetData(store), expected_enc_data_len,
@@ -264,6 +266,25 @@ static Sec_Result SecStore_Decrypt(Sec_ProcessorHandle *proc, void *store, SEC_S
 }
 
 Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac,
+        void *user_header, SEC_SIZE user_header_len,
+        void *data, SEC_SIZE data_len, void *store, SEC_SIZE storeLen)
+{
+    Sec_Result res;
+
+    res = SecStore_RetrieveDataWithKey(proc,
+        SEC_OBJECTID_STORE_AES_KEY, SEC_OBJECTID_STORE_MACKEYGEN_KEY, require_mac,
+        user_header, user_header_len,
+        data, data_len, store, storeLen);
+
+    if (res != SEC_RESULT_SUCCESS) {
+        SEC_LOG_ERROR("SecStore_RetrieveDataWithKey failed");
+    }
+
+    return res;
+}
+
+Sec_Result SecStore_RetrieveDataWithKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID aesKeyId, SEC_OBJECTID macGenId, SEC_BOOL require_mac,
         void *user_header, SEC_SIZE user_header_len,
         void *data, SEC_SIZE data_len, void *store, SEC_SIZE storeLen)
 {
@@ -310,7 +331,7 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
     /* decrypt container */
     if (SecStore_GetHeader(copy)->flags & SEC_STORE_FLAG_IS_ENCRYPTED)
     {
-        if (SEC_RESULT_SUCCESS != SecStore_Decrypt(proc, copy, SecStore_GetStoreLen(copy)))
+        if (SEC_RESULT_SUCCESS != SecStore_Decrypt(proc, aesKeyId, copy, SecStore_GetStoreLen(copy)))
         {
             SEC_LOG_ERROR("SecStore_Decrypt failed");
             goto done;
@@ -322,9 +343,6 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
     if (Sec_Memcmp(pad, SecStore_GetData(copy) + SecStore_GetDataLen(copy), pad[0]) != 0)
     {
         SEC_LOG_ERROR( "Invalid pad value encountered");
-        /*
-        SEC_PRINT("pad: "); Sec_PrintHex(SecStore_GetData(copy) + SecStore_GetDataLen(copy), pad[0]); SEC_PRINT("\n");
-        */
         goto done;
     }
 
@@ -339,19 +357,21 @@ Sec_Result SecStore_RetrieveData(Sec_ProcessorHandle *proc, SEC_BOOL require_mac
     }
     else
     {
-        if (SEC_RESULT_SUCCESS != SecStore_ComputeMacKey(proc, SEC_STORE_MAC_KEY_INPUT, mac_key, sizeof(mac_key)))
+        if (SEC_RESULT_SUCCESS != SecStore_ComputeMacKey(proc, macGenId, SEC_STORE_MAC_KEY_INPUT, mac_key, sizeof(mac_key)))
         {
             SEC_LOG_ERROR("SecStore_ComputeMacKey failed");
             goto done;
         }
 
-        if (NULL == HMAC(EVP_sha256(), mac_key, sizeof(mac_key),
+        if (SEC_RESULT_SUCCESS != _Pubops_HMAC(SEC_MACALGORITHM_HMAC_SHA256, mac_key, sizeof(mac_key),
                 copy, SecStore_GetStoreLen(copy) - SEC_STORE_MAC_LEN - SEC_STORE_IV_LEN,
-                mac, &mac_len))
-        {
-            SEC_LOG_ERROR("HMAC failed");
-            goto done;
+                mac, SEC_STORE_MAC_LEN)) {
+            SEC_LOG_ERROR("_Pubops_HMAC failed");
+            Sec_Memset(mac_key, 0, sizeof(mac_key));
+            return SEC_RESULT_FAILURE;
         }
+        Sec_Memset(mac_key, 0, sizeof(mac_key));
+        mac_len = SEC_STORE_MAC_LEN;
 
         if (mac_len != SEC_STORE_MAC_LEN || Sec_Memcmp(mac, SecStore_GetMac(copy), SEC_STORE_MAC_LEN) != 0)
         {
@@ -401,9 +421,28 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
         SEC_BYTE *user_header_magic, void *user_header, SEC_SIZE user_header_len,
         void *data, SEC_SIZE data_len, void *store, SEC_SIZE storeLen)
 {
+    Sec_Result res;
+
+    res = SecStore_StoreDataWithKey(proc,
+        SEC_OBJECTID_STORE_AES_KEY, SEC_OBJECTID_STORE_MACKEYGEN_KEY,
+        encrypt, gen_mac,
+        user_header_magic, user_header, user_header_len,
+        data, data_len, store, storeLen);
+
+    if (res != SEC_RESULT_SUCCESS) {
+        SEC_LOG_ERROR("SecStore_StoreDataWithKey failed");
+    }
+
+    return res;
+}
+
+Sec_Result SecStore_StoreDataWithKey(Sec_ProcessorHandle *proc,
+        SEC_OBJECTID aesKeyId, SEC_OBJECTID macGenId, SEC_BOOL encrypt, SEC_BOOL gen_mac,
+        SEC_BYTE *user_header_magic, void *user_header, SEC_SIZE user_header_len,
+        void *data, SEC_SIZE data_len, void *store, SEC_SIZE storeLen)
+{
     SecStore_Header *header = NULL;
     SEC_BYTE mac_key[32];
-    unsigned int mac_len;
     SEC_BYTE pad;
 
     if (store == NULL)
@@ -446,25 +485,23 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
     if (gen_mac)
     {
         /* calc mac */
-        if (SEC_RESULT_SUCCESS != SecStore_ComputeMacKey(proc, SEC_STORE_MAC_KEY_INPUT, mac_key, sizeof(mac_key)))
+        if (SEC_RESULT_SUCCESS != SecStore_ComputeMacKey(proc, macGenId, SEC_STORE_MAC_KEY_INPUT, mac_key, sizeof(mac_key)))
         {
             SEC_LOG_ERROR("SecStore_ComputeMacKey failed");
             return SEC_RESULT_FAILURE;
         }
 
-        if (NULL == HMAC(EVP_sha256(), mac_key, sizeof(mac_key),
+        if (SEC_RESULT_SUCCESS != _Pubops_HMAC(SEC_MACALGORITHM_HMAC_SHA256, mac_key, sizeof(mac_key),
                 store, SecStore_GetStoreLen(store) - SEC_STORE_MAC_LEN - SEC_STORE_IV_LEN,
-                SecStore_GetMac(store), &mac_len))
-        {
+                SecStore_GetMac(store), SEC_STORE_MAC_LEN)) {
+            SEC_LOG_ERROR("_Pubops_HMAC failed");
             Sec_Memset(mac_key, 0, sizeof(mac_key));
-            SEC_LOG_ERROR("HMAC failed");
             return SEC_RESULT_FAILURE;
         }
-
         Sec_Memset(mac_key, 0, sizeof(mac_key));
     }
 
-    if (encrypt && SEC_RESULT_SUCCESS != SecStore_Encrypt(proc, store, storeLen))
+    if (encrypt && SEC_RESULT_SUCCESS != SecStore_Encrypt(proc, aesKeyId, store, storeLen))
     {
         SEC_LOG_ERROR("SecStore_Encrypt failed");
         return SEC_RESULT_FAILURE;
@@ -472,26 +509,3 @@ Sec_Result SecStore_StoreData(Sec_ProcessorHandle *proc, SEC_BOOL encrypt, SEC_B
 
     return SEC_RESULT_SUCCESS;
 }
-
-/*
-static Sec_Result SecStore_Print(void *store)
-{
-    SecStore_Header *header = (SecStore_Header *) store;
-
-    SEC_PRINT("store [%d]: 0x%08x\n", SecStore_GetStoreLen(store), store);
-    SEC_PRINT("\tstore_magic: "); Sec_PrintHex(header->store_magic, sizeof(header->store_magic)); SEC_PRINT("\n");
-    SEC_PRINT("\theader_len: %d\n", Sec_BEBytesToUint32(header->header_len));
-    SEC_PRINT("\tdata_len: %d\n", Sec_BEBytesToUint32(header->data_len));
-    SEC_PRINT("\tuser_header_magic: "); Sec_PrintHex(header->user_header_magic, sizeof(header->user_header_magic)); SEC_PRINT("\n");
-    SEC_PRINT("\treserved: "); Sec_PrintHex(header->reserved, sizeof(header->reserved)); SEC_PRINT("\n");
-    SEC_PRINT("\tflags: 0x%02x\n", header->flags);
-    SEC_PRINT("\tuser_header [%d]: ", SecStore_GetUserHeaderLen(store));
-    Sec_PrintHex(SecStore_GetUserHeader(store), SecStore_GetUserHeaderLen(store));
-    SEC_PRINT("\n");
-    SEC_PRINT("\tdata [%d]: ", SecStore_GetDataLen(store)); Sec_PrintHex(SecStore_GetData(store), SecStore_GetDataLen(store)); SEC_PRINT("\n");
-    SEC_PRINT("\tpadding [0x%02x]: ", SecStore_GetPaddedDataLen(store) - SecStore_GetDataLen(store)); Sec_PrintHex(SecStore_GetData(store)+SecStore_GetDataLen(store), SecStore_GetPaddedDataLen(store) - SecStore_GetDataLen(store)); SEC_PRINT("\n");
-    SEC_PRINT("\tmac [%d]: ", SEC_STORE_MAC_LEN); Sec_PrintHex(SecStore_GetMac(store), SEC_STORE_MAC_LEN); SEC_PRINT("\n");
-    SEC_PRINT("\tiv [%d]: ", SEC_STORE_IV_LEN); Sec_PrintHex(SecStore_GetIV(store), SEC_STORE_IV_LEN); SEC_PRINT("\n");
-}
-*/
-

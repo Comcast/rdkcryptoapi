@@ -1,6 +1,19 @@
 /**
- * yajl impl of the sec_security_json interface.
+ * Copyright 2014 Comcast Cable Communications Management, LLC
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
  */
+
 #include "sec_security_json.h"
 
 #include <stdlib.h>
@@ -102,7 +115,8 @@ static void SecJsonVal_Free(Sec_JsonVal *val);
 static SecJsonValObj* SecJsonVal_GetObj(Sec_JsonVal *val);
 static SecJsonValArr* SecJsonVal_GetArr(Sec_JsonVal *val);
 
-void _Print(Sec_JsonVal *val, int indent) {
+#if SEC_TRACE_JSON
+static void _Print(Sec_JsonVal *val, int indent) {
     int i;
     SecJsonValArr *arr;
     SecJsonValObj *obj;
@@ -161,8 +175,9 @@ void _Print(Sec_JsonVal *val, int indent) {
 
         default:
             break;
-    }    
+    }
 }
+#endif
 
 #if SEC_TRACE_JSON
 static void _PrintJsonVal(Sec_JsonVal *val) {
@@ -187,7 +202,7 @@ static void _PrintJsonVal(Sec_JsonVal *val) {
 
         default:
             break;
-    }    
+    }
 
     SEC_PRINT("}");
 }
@@ -229,7 +244,7 @@ static void _PrintJsonValArr(SecJsonValArr* arr) {
 
     if (arr->next != NULL) {
         _PrintJsonValArr(arr->next);
-    }    
+    }
 }
 
 static void _PrintJsonValObj(SecJsonValObj* obj) {
@@ -241,13 +256,13 @@ static void _PrintJsonValObj(SecJsonValObj* obj) {
 
     if (obj->next != NULL) {
         _PrintJsonValObj(obj->next);
-    }    
+    }
 }
 
 #endif
 
 static SecJsonValObj* SecJsonValObj_New() {
-    SecJsonValObj *obj = malloc(sizeof(SecJsonValObj));
+    SecJsonValObj *obj = (SecJsonValObj *) malloc(sizeof(SecJsonValObj));
     if (obj == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -261,11 +276,11 @@ static SecJsonValObj* SecJsonValObj_New() {
     SEC_PRINT("\n");
 #endif
 
-    return obj;    
+    return obj;
 }
 
 static SecJsonValArr* SecJsonValArr_New() {
-    SecJsonValArr *obj = malloc(sizeof(SecJsonValArr));
+    SecJsonValArr *obj = (SecJsonValArr *) malloc(sizeof(SecJsonValArr));
     if (obj == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -279,7 +294,7 @@ static SecJsonValArr* SecJsonValArr_New() {
     SEC_PRINT("\n");
 #endif
 
-    return obj;    
+    return obj;
 }
 
 static void SecJsonValObj_Free(SecJsonValObj *obj) {
@@ -368,7 +383,7 @@ static void SecJsonVal_Free(Sec_JsonVal *val) {
 }
 
 static char * _copyString(const char *input, SEC_SIZE len) {
-    char *output = malloc(len+1);
+    char *output = (char *) malloc(len+1);
     if (output == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -383,17 +398,17 @@ static char * _copyString(const char *input, SEC_SIZE len) {
 char debug_buffer[1024];
 char * _debugString(const char *input, SEC_SIZE len) {
     if (len >= sizeof(debug_buffer)) {
-        return "********";
+        return (char *) "********";
     }
 
     memset(debug_buffer, 0, sizeof(debug_buffer));
     strncpy(debug_buffer, input, len);
 
-    return debug_buffer;    
+    return debug_buffer;
 }
 
 static Sec_JsonVal* SecJsonVal_NewStr(const char *str, SEC_SIZE len) {
-    Sec_JsonVal *val = malloc(sizeof(Sec_JsonVal));
+    Sec_JsonVal *val = (Sec_JsonVal *) malloc(sizeof(Sec_JsonVal));
     if (val == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -419,7 +434,7 @@ static Sec_JsonVal* SecJsonVal_NewStr(const char *str, SEC_SIZE len) {
 }
 
 static Sec_JsonVal* SecJsonVal_NewObj() {
-    Sec_JsonVal *val = malloc(sizeof(Sec_JsonVal));
+    Sec_JsonVal *val = (Sec_JsonVal *) malloc(sizeof(Sec_JsonVal));
     if (val == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -459,7 +474,7 @@ static SecJsonValObj* SecJsonVal_GetObj(Sec_JsonVal *val) {
 }
 
 static Sec_JsonVal* SecJsonVal_NewArr() {
-    Sec_JsonVal *val = malloc(sizeof(Sec_JsonVal));
+    Sec_JsonVal *val = (Sec_JsonVal *) malloc(sizeof(Sec_JsonVal));
     if (val == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -499,7 +514,7 @@ static SecJsonValArr* SecJsonVal_GetArr(Sec_JsonVal *val) {
 }
 
 static SecJsonCtx* SecJsonCtx_New(Sec_JsonVal *val) {
-    SecJsonCtx *ctx = malloc(sizeof(SecJsonCtx));
+    SecJsonCtx *ctx = (SecJsonCtx *) malloc(sizeof(SecJsonCtx));
     if (ctx == NULL) {
         SEC_LOG_ERROR("malloc failed");
         return NULL;
@@ -647,7 +662,7 @@ static int _SetValue(Sec_JsonParseCtx *session, Sec_JsonVal *val) {
 
         if (obj->val != NULL) {
             SEC_LOG_ERROR("obj->val != NULL");
-            return 0;            
+            return 0;
         }
 
         obj->val = val;
@@ -745,7 +760,7 @@ static int _NullCallback(void * ctx) {
         SEC_LOG_ERROR("_SetValue failed");
         return 0;
     }
-    
+
 #if SEC_TRACE_JSON
     SEC_PRINT("_NullCallback AFTER: ");
     _PrintJsonParseCtx(session);
@@ -779,7 +794,7 @@ static int _StringCallback(void * ctx, const unsigned char * stringVal, size_t s
         SEC_LOG_ERROR("_SetValue failed");
         return 0;
     }
-    
+
 #if SEC_TRACE_JSON
     SEC_PRINT("_StringCallback AFTER: ");
     _PrintJsonParseCtx(session);
@@ -812,7 +827,7 @@ static int _NumberCallback(void * ctx, const char * stringVal, size_t stringLen)
         SEC_LOG_ERROR("_SetValue failed");
         return 0;
     }
-    
+
 #if SEC_TRACE_JSON
     SEC_PRINT("_NumberCallback AFTER: ");
     _PrintJsonParseCtx(session);
@@ -906,7 +921,7 @@ static int _StartMapCallback(void *ctx) {
     if (!_SetValue(session, val)) {
         SecJsonVal_Free(val);
         SEC_LOG_ERROR("_SetValue failed");
-        return 0;        
+        return 0;
     }
 
     if (!_PushCtx(session, val)) {
@@ -1317,7 +1332,6 @@ Sec_JsonVal * SecJson_GetObjEntry(Sec_JsonVal *val, const char *key) {
         obj = obj->next;
     }
 
-    SEC_LOG_ERROR("Could not find map entry with name: %s", key);
     return NULL;
 }
 

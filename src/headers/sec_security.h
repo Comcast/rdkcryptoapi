@@ -20,7 +20,9 @@
 #include "sec_security_datatype.h"
 #include "sec_security_common.h"
 #include <stdio.h>
+#if !defined(SEC_TARGET_IOS) && !defined(SEC_TARGET_TVOS)
 #include <sys/syscall.h>
+#endif
 #include <unistd.h>
 
 #ifdef __cplusplus
@@ -62,7 +64,11 @@ extern "C"
         }   \
     } while (0)
 
-#define SEC_LOG(txt, ...) do { SEC_PRINT("[%ld] " txt " (%s, %s, line %d)\n", (long int) syscall(SYS_gettid), ## __VA_ARGS__, __PRETTY_FUNCTION__, __FILE__, __LINE__); } while (0)
+#if defined(SEC_TARGET_IOS) || defined(SEC_TARGET_TVOS)
+    #define SEC_LOG(txt, ...) do { SEC_PRINT("" txt " (%s, %s, line %d)\n", ## __VA_ARGS__, __PRETTY_FUNCTION__, __FILE__, __LINE__); } while (0)
+#else
+    #define SEC_LOG(txt, ...) do { SEC_PRINT("[%ld] " txt " (%s, %s, line %d)\n", (long int) syscall(SYS_gettid), ## __VA_ARGS__, __PRETTY_FUNCTION__, __FILE__, __LINE__); } while (0)
+#endif
 
 #define SEC_LOG_ERROR(txt, ...) do { SEC_LOG("ERROR: " txt, ## __VA_ARGS__); } while (0)
 
@@ -238,16 +244,17 @@ Sec_Result SecCipher_ProcessFragmented(Sec_CipherHandle* cipherHandle, SEC_BYTE*
  * @param cipherHandle cipher handle
  * @param inputHandle opaque buffer containing input
  * @param outputHandle opaque buffer for writing output
+ * @param inputSize the length of input to process
  * @param lastInput boolean value specifying whether this is the last chunk
  * of input that will be processed.
  * @param bytesWritten pointer to a value that will be set to number
  * of bytes written to the output buffer
  */
 Sec_Result SecCipher_ProcessOpaque(Sec_CipherHandle* cipherHandle,
-        Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle, SEC_BOOL lastInput,
-        SEC_SIZE *bytesWritten);
+        Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle,
+        SEC_SIZE inputSize, SEC_BOOL lastInput, SEC_SIZE *bytesWritten);
 
-Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
+Sec_Result SecCipher_ProcessCtrWithOpaqueDataShift(Sec_CipherHandle* cipherHandle, Sec_OpaqueBufferHandle* inputHandle, Sec_OpaqueBufferHandle* outputHandle, SEC_SIZE inputSize, SEC_SIZE *bytesWritten, SEC_SIZE dataShift);
 
 /**
  * @brief Perform cipher operation on the opaque input handle and check the output against the expected value.
@@ -698,26 +705,6 @@ Sec_Result SecKey_Derive_ConcatKDF(Sec_ProcessorHandle* secProcHandle,
         SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize);
 
 /**
- * @brief Derive and provision a key using the PBEKDF algorithm
- *
- * @param secProcHandle secure processor handle
- * @param object_id_derived id of the key to provision
- * @param type_derived derived key type
- * @param loc_derived storage location where the derived key should be provisioned
- * @param macAlgorithm mac algorithm to use in the key derivation process
- * @param salt pointer to the salt value to use in key derivation process
- * @param saltSize the length of the salt buffer in bytes
- * @param numIterations number of iterations to use in the key derivation process
- *
- * @return The status of the operation
- */
-Sec_Result SecKey_Derive_PBEKDF(Sec_ProcessorHandle* secProcHandle,
-        SEC_OBJECTID object_id_derived, Sec_KeyType type_derived,
-        Sec_StorageLoc loc_derived, Sec_MacAlgorithm macAlgorithm,
-        SEC_BYTE *nonce,
-        SEC_BYTE *salt, SEC_SIZE saltSize, SEC_SIZE numIterations);
-
-/**
  * @brief Derive and provision an AES 128-bit key a vendor specific key ladder algorithm.
  *
  * This function will generate a key derived from one of the OTP keys.  The
@@ -914,7 +901,7 @@ Sec_Result SecCipher_ProcessCtrWithDataShift(Sec_CipherHandle* cipherHandle, SEC
 
 Sec_Result SecKey_ExportKey(Sec_KeyHandle* keyHandle, SEC_BYTE* derivationInput, SEC_BYTE* exportedKey, SEC_SIZE keyBufferLen, SEC_SIZE *keyBytesWritten);
 
-Sec_Result SecKey_GetProperties(Sec_KeyHandle* keyHandle,Sec_KeyProperties* keyProperties);
+Sec_Result SecKey_GetProperties(Sec_KeyHandle* keyHandle, Sec_KeyProperties* keyProperties);
 
 /**
  * @brief Checks secure boot configuration to verify that Secure Boot is enabled.
@@ -937,6 +924,7 @@ Sec_Result SecOpaqueBuffer_Malloc(SEC_SIZE bufLength, Sec_OpaqueBufferHandle **h
 Sec_Result SecOpaqueBuffer_Write(Sec_OpaqueBufferHandle *handle, SEC_SIZE offset, SEC_BYTE *data, SEC_SIZE length);
 Sec_Result SecOpaqueBuffer_Free(Sec_OpaqueBufferHandle *handle);
 Sec_Result SecOpaqueBuffer_Release(Sec_OpaqueBufferHandle *handle, Sec_ProtectedMemHandle **svpHandle);
+Sec_Result SecOpaqueBuffer_Copy(Sec_OpaqueBufferHandle *out, SEC_SIZE out_offset, Sec_OpaqueBufferHandle *in, SEC_SIZE in_offset, SEC_SIZE num_to_copy);
 
 Sec_Result SecKeyExchange_GetInstance(Sec_ProcessorHandle* secProcHandle, Sec_KeyExchangeAlgorithm exchangeType, void* exchangeParameters, Sec_KeyExchangeHandle** keyExchangeHandle);
 
@@ -946,12 +934,12 @@ Sec_Result SecKeyExchange_ComputeSecret(Sec_KeyExchangeHandle* keyExchangeHandle
 
 Sec_Result SecKeyExchange_Release(Sec_KeyExchangeHandle* keyExchangeHandle);
 
-Sec_Result SecKey_Derive_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_StorageLoc loc, SEC_BYTE *nonce);
+Sec_Result SecKey_Derive_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType keytype, Sec_StorageLoc loc, SEC_BYTE *nonce);
 
-Sec_Result SecKey_Derive_HKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_MacAlgorithm macAlgorithm, SEC_BYTE *nonce, SEC_BYTE *salt, SEC_SIZE saltSize, SEC_BYTE *info, SEC_SIZE infoSize, SEC_OBJECTID baseKeyId);
+Sec_Result SecKey_Derive_HKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_MacAlgorithm macAlgorithm, SEC_BYTE *salt, SEC_SIZE saltSize, SEC_BYTE *info, SEC_SIZE infoSize, SEC_OBJECTID baseKeyId);
 
-Sec_Result SecKey_Derive_ConcatKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *nonce, SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize, SEC_OBJECTID baseKeyId);
-    
+Sec_Result SecKey_Derive_ConcatKDF_BaseKey(Sec_ProcessorHandle* secProcHandle, SEC_OBJECTID idDerived, Sec_KeyType typeDerived, Sec_StorageLoc locDerived, Sec_DigestAlgorithm digestAlgorithm, SEC_BYTE *otherInfo, SEC_SIZE otherInfoSize, SEC_OBJECTID baseKeyId);
+
 #ifdef __cplusplus
 }
 #endif

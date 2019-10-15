@@ -47,7 +47,7 @@ int Sec_Memcmp(const void* ptr1, const void* ptr2, const size_t num)
 
 void *Sec_Memset(void *ptr, int value, size_t num)
 {
-	volatile SEC_BYTE *p = ptr;
+	volatile SEC_BYTE *p = (SEC_BYTE *) ptr;
 	while (num--)
 		*p++ = value;
 	return ptr;
@@ -158,7 +158,7 @@ Sec_Result SecCipher_IsValidKey(Sec_KeyType key_type,
 		break;
 	}
 
-	SEC_LOG_ERROR("Unimplemented algorithm");
+	SEC_LOG_ERROR("Unimplemented algorithm: %d", alg);
 	return SEC_RESULT_UNIMPLEMENTED_FEATURE;
 }
 
@@ -468,13 +468,13 @@ Sec_DigestAlgorithm SecSignature_GetDigestAlgorithm(Sec_SignatureAlgorithm alg)
 	{
 	case SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS:
 	case SEC_SIGNATUREALGORITHM_RSA_SHA1_PKCS_DIGEST:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA1_PSS_DIGEST:
 		return SEC_DIGESTALGORITHM_SHA1;
 	case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS:
 	case SEC_SIGNATUREALGORITHM_RSA_SHA256_PKCS_DIGEST:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS:
-  case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS:
+    case SEC_SIGNATUREALGORITHM_RSA_SHA256_PSS_DIGEST:
 	case SEC_SIGNATUREALGORITHM_ECDSA_NISTP256:
 	case SEC_SIGNATUREALGORITHM_ECDSA_NISTP256_DIGEST:
 		return SEC_DIGESTALGORITHM_SHA256;
@@ -482,6 +482,7 @@ Sec_DigestAlgorithm SecSignature_GetDigestAlgorithm(Sec_SignatureAlgorithm alg)
 		break;
 	}
 
+	SEC_LOG_ERROR("Unexpected alg encountered: %d", alg);
 	return SEC_DIGESTALGORITHM_NUM;
 }
 
@@ -617,7 +618,7 @@ Sec_KeyContainer SecKey_GetRSAKCForBitLength(int numBits) {
 			return SEC_KEYCONTAINER_RAW_RSA_3072;
 		default:
 		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
-		  return SEC_KEYTYPE_NUM;
+		  return SEC_KEYCONTAINER_NUM;
 	}
 }
 
@@ -631,7 +632,7 @@ Sec_KeyContainer SecKey_GetRSAPubKCForBitLength(int numBits) {
 			return SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC;
 		default:
 		  SEC_LOG_ERROR("Invalid numBits encountered: %d", numBits);
-		  return SEC_KEYTYPE_NUM;
+		  return SEC_KEYCONTAINER_NUM;
 	}
 }
 
@@ -663,7 +664,7 @@ Sec_KeyType SecKey_GetRSAPubKeyTypeForByteLength(int numBytes) {
 	}
 }
 
-Sec_KeyType SecKey_GetRSAKCForByteLength(int numBytes) {
+Sec_KeyContainer SecKey_GetRSAKCForByteLength(int numBytes) {
 	switch (numBytes) {
 		case 128:
 			return SEC_KEYCONTAINER_RAW_RSA_1024;
@@ -673,11 +674,11 @@ Sec_KeyType SecKey_GetRSAKCForByteLength(int numBytes) {
 			return SEC_KEYCONTAINER_RAW_RSA_3072;
 		default:
 		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
-		  return SEC_KEYTYPE_NUM;
+		  return SEC_KEYCONTAINER_NUM;
 	}
 }
 
-Sec_KeyType SecKey_GetRSAPubKCForByteLength(int numBytes) {
+Sec_KeyContainer SecKey_GetRSAPubKCForByteLength(int numBytes) {
 	switch (numBytes) {
 		case 128:
 			return SEC_KEYCONTAINER_RAW_RSA_1024_PUBLIC;
@@ -687,7 +688,7 @@ Sec_KeyType SecKey_GetRSAPubKCForByteLength(int numBytes) {
 			return SEC_KEYCONTAINER_RAW_RSA_3072_PUBLIC;
 		default:
 		  SEC_LOG_ERROR("Invalid numBytes encountered: %d", numBytes);
-		  return SEC_KEYTYPE_NUM;
+		  return SEC_KEYCONTAINER_NUM;
 	}
 }
 
@@ -702,13 +703,14 @@ Sec_Result SecSignature_SingleInputCert(Sec_ProcessorHandle* secProcHandle,
 	Sec_KeyHandle *key = NULL;
 	Sec_RSARawPublicKey rsaPubKey;
     Sec_ECCRawPublicKey eccPubKey;
+    Sec_KeyType keyType;
 
     if (mode == SEC_SIGNATUREMODE_SIGN) {   // Sanity check: This does not handle SIGN
         SEC_LOG_ERROR("SecSignature_SingleInputCert does not support SEC_SIGNATUREMODE_SIGN");
         goto done;
     }
 
-	Sec_KeyType keyType = SecCertificate_GetKeyType(certHandle);
+	keyType = SecCertificate_GetKeyType(certHandle);
 
 	switch (keyType) {
 	case SEC_KEYTYPE_RSA_1024_PUBLIC:
@@ -1028,6 +1030,22 @@ SEC_BOOL SecKey_IsAES(Sec_KeyType type)
 	return 0;
 }
 
+SEC_BOOL SecKey_IsHMAC(Sec_KeyType type)
+{
+    switch (type)
+    {
+    case SEC_KEYTYPE_HMAC_128:
+    case SEC_KEYTYPE_HMAC_160:
+    case SEC_KEYTYPE_HMAC_256:
+        return 1;
+
+    default:
+        break;
+    }
+
+    return 0;
+}
+
 SEC_BOOL SecKey_IsRsa(Sec_KeyType type)
 {
 	switch (type)
@@ -1126,6 +1144,10 @@ SEC_BOOL SecKey_IsProvisioned(Sec_ProcessorHandle* secProcHandle,
 		SEC_OBJECTID object_id)
 {
 	Sec_KeyHandle *key;
+
+    if (SEC_OBJECTID_INVALID == object_id) {
+        return 0;
+    }
 
 	if (SEC_RESULT_SUCCESS != SecKey_GetInstance(secProcHandle, object_id, &key))
 	{
@@ -1771,7 +1793,7 @@ done:
 }
 
 Sec_Result SecKey_GenerateWrappedKeyAsn1V3(SEC_BYTE *payload, SEC_SIZE payloadLen, Sec_KeyType wrappedKeyType,
-                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen, 
+                                         SEC_BYTE *wrappingKey, SEC_SIZE wrappingKeyLen,
                                          SEC_BYTE *wrappingIv, Sec_CipherAlgorithm wrappingAlgorithm,
                                          SEC_BYTE *output, SEC_SIZE output_len, SEC_SIZE *written, SEC_SIZE key_offset)
 {
@@ -1997,7 +2019,7 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1V3(Sec_Asn1KC *kc,
         	SEC_LOG_ERROR("SecAsn1KC_GetAttrBuffer SEC_ASN1KC_WRAPPINGKEYID failed");
         	return SEC_RESULT_FAILURE;
     	}
-    }    	
+    }
 
     return SEC_RESULT_SUCCESS;
 }
@@ -2030,6 +2052,17 @@ Sec_Result SecKey_ExtractWrappedKeyParamsAsn1BufferV3(SEC_BYTE *asn1, SEC_SIZE a
 done:
     SecAsn1KC_Free(asn1kc);
     return res;
+}
+
+void SecKeyProperties_SetDefault(Sec_KeyProperties* props, Sec_KeyType type) {
+    memset(props->keyId, 0, sizeof(props->keyId));
+    memset(props->rights, SEC_KEYOUTPUTRIGHT_NOT_SET, sizeof(props->rights));
+    memset(props->notBefore, 0, sizeof(props->notBefore));
+    memset(props->notOnOrAfter, 0, sizeof(props->notOnOrAfter));
+    props->keyLength = SecKey_GetKeyLenForKeyType(type);
+    props->keyType = type;
+    props->usage = SEC_KEYUSAGE_DATA_KEY;
+    props->cacheable = 1;
 }
 
 #endif
