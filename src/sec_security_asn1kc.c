@@ -1,5 +1,8 @@
 /**
- * Copyright 2014 - 2019 Comcast Cable Communications Management, LLC
+ * If not stated otherwise in this file or this component's Licenses.txt file the
+ * following copyright and licenses apply:
+ *
+ * Copyright 2014 - 2019 RDK Management
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -228,8 +231,10 @@ static Asn1KCAttribute_t *SecAsn1KC_GetAttr(Sec_Asn1KC *kc, const char *key)
     for(i = 0; i < sk_Asn1KCAttribute_t_num(kc); ++i)
     {
         at = sk_Asn1KCAttribute_t_value(kc, i);
-        if (strlen(key) == ASN1_STRING_length(at->name) &&
-                0 == Sec_Memcmp(key, ASN1_STRING_data(at->name), ASN1_STRING_length(at->name)))
+        if (at != NULL &&
+            strlen(key) == ASN1_STRING_length(at->name) &&
+            ASN1_STRING_data(at->name) != NULL &&
+            0 == Sec_Memcmp(key, ASN1_STRING_data(at->name), ASN1_STRING_length(at->name)))
         {
             return at;
         }
@@ -377,6 +382,7 @@ Sec_Result SecAsn1KC_GetAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t *va
 Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *buffer, SEC_SIZE buffer_len, SEC_SIZE *written)
 {
     Asn1KCAttribute_t *attr = NULL;
+    unsigned char *str_data = NULL;
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -401,7 +407,14 @@ Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *bu
             return SEC_RESULT_FAILURE;
         }
 
-        memcpy(buffer, ASN1_STRING_data(attr->value->c.octetstring), *written);
+        str_data = ASN1_STRING_data(attr->value->c.octetstring);
+        if(str_data == NULL)
+        {
+            SEC_LOG_ERROR("Call to ASN1_STRING_data failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        memcpy(buffer, str_data, *written);
     }
 
     return SEC_RESULT_SUCCESS;
@@ -410,6 +423,7 @@ Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *bu
 Sec_Result SecAsn1KC_GetAttrString(Sec_Asn1KC *kc, const char *key, char *buffer, SEC_SIZE buffer_len, SEC_SIZE *written)
 {
     Asn1KCAttribute_t *attr = NULL;
+    unsigned char *str_data = NULL;
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -433,7 +447,14 @@ Sec_Result SecAsn1KC_GetAttrString(Sec_Asn1KC *kc, const char *key, char *buffer
             return SEC_RESULT_FAILURE;
         }
 
-        memcpy(buffer, ASN1_STRING_data(attr->value->c.octetstring), *written);
+        str_data = ASN1_STRING_data(attr->value->c.octetstring);
+        if(str_data == NULL)
+        {
+            SEC_LOG_ERROR("Call to ASN1_STRING_data failed");
+            return SEC_RESULT_FAILURE;
+        }
+
+        memcpy(buffer, str_data, *written);
         buffer[*written] = '\0';
     }
 
