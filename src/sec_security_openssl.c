@@ -4515,6 +4515,13 @@ static Sec_Result _ConcatKDF(Sec_ProcessorHandle* secProcHandle,
     Sec_Result res = SEC_RESULT_FAILURE;
 
     digest_length = SecDigest_GetDigestLenForAlgorithm(digestAlgorithm);
+
+    if(digest_length == 0)
+    {
+        SEC_LOG_ERROR("Invalid digest length");
+        goto done;
+    }
+
     r = out_key_length / digest_length + ((out_key_length % digest_length == 0) ? 0 : 1);
 
     for (i = 1; i <= r; ++i)
@@ -4930,6 +4937,8 @@ Sec_Result SecKey_ComputeBaseKeyDigest(Sec_ProcessorHandle* secProcHandle, SEC_B
                     &base_key))
     {
         SEC_LOG_ERROR("SecKey_GetInstance failed");
+        SecKey_Release(base_key);
+        base_key = NULL;
         return SEC_RESULT_FAILURE;
     }
 
@@ -4938,6 +4947,8 @@ Sec_Result SecKey_ComputeBaseKeyDigest(Sec_ProcessorHandle* secProcHandle, SEC_B
     if (SEC_RESULT_SUCCESS != _Sec_SymetricFromKeyHandle(base_key, base_key_clear, sizeof(base_key_clear), &wr))
     {
         SEC_LOG_ERROR("_Sec_SymetricFromKeyHandle failed");
+        SecKey_Release(base_key);
+        base_key = NULL;
         return SEC_RESULT_FAILURE;
     }
     SecKey_Release(base_key);
@@ -5680,6 +5691,7 @@ Sec_Result SecProcessor_GetInfo(Sec_ProcessorHandle* secProcHandle,
 
     Sec_Memset(secProcInfo, 0x00, sizeof(Sec_ProcessorInfo));
     strncpy((char *)secProcInfo->version, SEC_API_VERSION, strlen(SEC_API_VERSION));
+    secProcInfo->version[strlen(SEC_API_VERSION)] = '\0';
 
     return SEC_RESULT_SUCCESS;
 }
