@@ -111,6 +111,7 @@ Sec_Result SecUtils_ReadFile(const char *path, void *data, SEC_SIZE data_len,
     FILE *f = NULL;
     Sec_Result sec_res = SEC_RESULT_SUCCESS;
     SEC_BYTE last_byte;
+    SEC_SIZE read = 0;
 
     *data_read = 0;
 
@@ -134,7 +135,7 @@ Sec_Result SecUtils_ReadFile(const char *path, void *data, SEC_SIZE data_len,
         goto cleanup;
     }
 
-    fread(&last_byte, 1, 1, f);
+    read= fread(&last_byte, 1, 1, f);
 
     if (0 == feof(f))
     {
@@ -374,7 +375,8 @@ Sec_Result SecUtils_RmFile(const char *path)
 	if (len > 0) {
 		zeros = calloc(len, 1);
 		if (zeros != NULL) {
-			SecUtils_WriteFile(path, zeros, len);
+			if (SecUtils_WriteFile(path, zeros, len) != SEC_RESULT_SUCCESS)
+				SEC_LOG_ERROR("Could not write zeros");
 			free(zeros);
 		} else {
 	        SEC_LOG_ERROR("calloc failed");

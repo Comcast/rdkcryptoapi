@@ -1135,6 +1135,8 @@ Sec_Result SecJson_GenClose(Sec_JsonGenCtx *ctx, char *result, SEC_SIZE max_len)
 
     if (result != NULL && max_len > 0)
         result[0] = '\0';
+    else if(result == NULL)
+        goto cleanup;
 
     JSON_ENSURE_INIT();
 
