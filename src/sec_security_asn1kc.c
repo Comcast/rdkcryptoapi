@@ -768,11 +768,6 @@ Sec_Asn1KC *SecAsn1KC_Decode(SEC_BYTE *buf, SEC_SIZE buf_len)
              return NULL;
         }
     }
-    else if (buf_len > UINT32_MAX)
-    {
-        SEC_LOG_ERROR("der_encode_to_buffer failed");
-        return NULL;
-    }
 
     ret = d2i_Sec_Asn1KC(NULL, &c_buf, (long)buf_len);
     return ret;

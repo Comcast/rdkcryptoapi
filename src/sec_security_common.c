@@ -1488,7 +1488,11 @@ Sec_Result SecDigest_SingleInput(Sec_ProcessorHandle *proc,
 	if (res != SEC_RESULT_SUCCESS)
 	{
 		SEC_LOG_ERROR("SecDigest_GetInstance failed");
-		SecDigest_Release(digest_handle, digest, digest_len);
+    if(digest_handle != NULL)
+    {
+      SecDigest_Release(digest_handle, digest, digest_len);
+      digest_handle = NULL;
+    }
 		return res;
 	}
 

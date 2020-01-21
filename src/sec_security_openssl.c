@@ -4937,8 +4937,10 @@ Sec_Result SecKey_ComputeBaseKeyDigest(Sec_ProcessorHandle* secProcHandle, SEC_B
                     &base_key))
     {
         SEC_LOG_ERROR("SecKey_GetInstance failed");
-        SecKey_Release(base_key);
-        base_key = NULL;
+        if(base_key != NULL) {
+          SecKey_Release(base_key);
+          base_key = NULL;
+        }
         return SEC_RESULT_FAILURE;
     }
 
