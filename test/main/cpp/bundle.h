@@ -17,4 +17,12 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_BUNDLE_H_
+#define TEST_BUNDLE_H_
+
+#include "sec_security.h"
+
+Sec_Result testBundleProvision(SEC_OBJECTID id, Sec_StorageLoc loc, SEC_SIZE size);
+Sec_Result testBundleProvisionNoAppDir(SEC_OBJECTID id, SEC_SIZE size);
+
+#endif

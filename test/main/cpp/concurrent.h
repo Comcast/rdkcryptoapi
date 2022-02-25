@@ -17,4 +17,13 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_CONCURRENT_H_
+#define TEST_CONCURRENT_H_
+
+#include "sec_security.h"
+#include "test_creds.h"
+
+Sec_Result testConcurrentVendor128(SEC_SIZE numThreads);
+Sec_Result testConcurrentRsa(TestKey pub, TestKey priv, TestKc kc, SEC_SIZE numThreads);
+
+#endif

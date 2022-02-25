@@ -17,4 +17,21 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_EXCHANGE_H_
+#define TEST_EXCHANGE_H_
+
+#include "sec_security.h"
+#include "test_creds.h"
+#include <vector>
+
+Sec_Result testKeyExchangeDH(
+	SEC_OBJECTID idComputed,
+	Sec_StorageLoc loc,
+	Sec_KeyType typeComputed);
+
+Sec_Result testKeyExchangeECDH(
+  SEC_OBJECTID idComputed,
+  Sec_StorageLoc loc,
+  Sec_KeyType typeComputed);
+
+#endif

@@ -17,4 +17,19 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_SIGN_H_
+#define TEST_SIGN_H_
+
+#include "sec_security.h"
+#include <vector>
+#include "test_creds.h"
+
+std::vector<SEC_BYTE> signOpenSSL(Sec_SignatureAlgorithm alg, TestKey key, const std::vector<SEC_BYTE>& input);
+
+SEC_BOOL verifyOpenSSL(Sec_SignatureAlgorithm alg, TestKey key, const std::vector<SEC_BYTE>& input, const std::vector<SEC_BYTE>& sig);
+
+Sec_Result testSignature(
+		SEC_OBJECTID id, TestKey pub, TestKey priv, TestKc kc, Sec_StorageLoc loc,
+		Sec_SignatureAlgorithm alg, Sec_SignatureMode mode, SEC_SIZE inputSize);
+
+#endif

@@ -17,4 +17,14 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_CERT_H_
+#define TEST_CERT_H_
+
+#include "sec_security.h"
+#include "test_creds.h"
+
+Sec_Result testCertProvision(SEC_OBJECTID id, TestCert cert, Sec_StorageLoc loc);
+Sec_Result testCertExport(SEC_OBJECTID id, TestCert cert, Sec_StorageLoc loc);
+Sec_Result testCertVerify(SEC_OBJECTID id_cert, TestCert cert, SEC_OBJECTID id_key, TestKey key, Sec_StorageLoc loc);
+
+#endif

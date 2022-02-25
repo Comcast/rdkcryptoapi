@@ -17,4 +17,16 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef sec_api_utest_main_h
+#define sec_api_utest_main_h
+
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+    int testIt(int argc, char *argv[]);
+
+#ifdef __cplusplus
+}
+#endif
+#endif /* sec_api_utest_main_h */

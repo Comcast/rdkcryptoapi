@@ -17,4 +17,22 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_DIGEST_H_
+#define TEST_DIGEST_H_
+
+#include "sec_security.h"
+#include "test_creds.h"
+#include <vector>
+
+Sec_Result testDigestSingle(
+		Sec_DigestAlgorithm alg, SEC_SIZE inputSize);
+
+Sec_Result testDigestMult(
+		Sec_DigestAlgorithm alg, const std::vector<SEC_SIZE>& inputSizes);
+
+Sec_Result testDigestOverKey(Sec_DigestAlgorithm alg, SEC_OBJECTID id, TestKey key, Sec_StorageLoc loc);
+
+std::vector<SEC_BYTE> digestOpenSSL(
+		Sec_DigestAlgorithm alg, const std::vector<SEC_BYTE>& input);
+
+#endif

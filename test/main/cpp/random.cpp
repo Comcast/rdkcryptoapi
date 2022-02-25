@@ -17,4 +17,32 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#include "random.h"
+#include "test_ctx.h"
+
+Sec_Result testRandom(Sec_RandomAlgorithm alg, SEC_SIZE size) {
+	TestCtx ctx;
+
+	if (ctx.init() != SEC_RESULT_SUCCESS) {
+		SEC_LOG_ERROR("TestCtx.init failed");
+		return SEC_RESULT_FAILURE;
+	}
+
+	Sec_RandomHandle *handle = NULL;
+	if (NULL == (handle = ctx.acquireRandom(alg))) {
+		SEC_LOG_ERROR("TestCtx::acquireRandom failed");
+		return SEC_RESULT_FAILURE;
+	}
+
+	std::vector<SEC_BYTE> out;
+	out.resize(size);
+
+	if (SEC_RESULT_SUCCESS != SecRandom_Process(handle, &out[0], out.size())) {
+		SEC_LOG_ERROR("SecRandom_Process failed");
+		return SEC_RESULT_FAILURE;
+	}
+
+	TestCtx::printHex("out", out);
+
+	return SEC_RESULT_SUCCESS;
+}

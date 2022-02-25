@@ -17,4 +17,15 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_PROCESSOR_H_
+#define TEST_PROCESSOR_H_
+
+#include "sec_security.h"
+
+Sec_Result testProcessorPrintInfo();
+Sec_Result testProcessorGetDeviceId();
+Sec_Result testProcessorGetKeyLadderMinMaxDepth(Sec_KeyLadderRoot root);
+Sec_Result testProcessorNativeMallocFree();
+Sec_Result testProcessorGetInfo();
+
+#endif

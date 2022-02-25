@@ -17,4 +17,19 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_SVP_H_
+#define TEST_SVP_H_
+
+#include "sec_security.h"
+#include <vector>
+#include "test_creds.h"
+
+Sec_Result testOpaqueMalloc();
+Sec_Result testCopyOpaque();
+Sec_Result testSecureBootEnabled();
+Sec_Result testSetTime();
+Sec_Result testKeycheckOpaque(SEC_OBJECTID id, TestKey key, TestKc kc, Sec_StorageLoc loc);
+Sec_Result testProcessOpaque(SEC_OBJECTID id, TestKey key, TestKc kc, Sec_StorageLoc loc);
+Sec_Result testProcessDataShiftOpaque(SEC_OBJECTID id, TestKey key, TestKc kc, Sec_StorageLoc loc);
+
+#endif

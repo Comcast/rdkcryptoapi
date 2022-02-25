@@ -36,6 +36,7 @@
 #include "sec_security_outprot.h"
 #include <pthread.h>
 #include "outprot.h"
+#include <time.h>
 
 #ifndef SEC_OBJECTID_COMCAST_XCALSESSIONMACKEY
 #define SEC_OBJECTID_COMCAST_XCALSESSIONMACKEY 0xffffffff00000001ULL
@@ -165,6 +166,7 @@ static Sec_Result _store_exported(Sec_ProcessorHandle *proc, SEC_BYTE *derivatio
 
     *exported_written = 0;
 
+    Sec_Result export_res = SEC_RESULT_FAILURE;
     if (exported_len < SEC_AES_BLOCK_SIZE) {
         SEC_LOG_ERROR("Not enough room to write derivation input");
         goto done_export;
@@ -186,7 +188,6 @@ static Sec_Result _store_exported(Sec_ProcessorHandle *proc, SEC_BYTE *derivatio
 
     pthread_mutex_lock(&g_export_mutex);
 
-    Sec_Result export_res = SEC_RESULT_FAILURE;
     export_res = _provision_export_keys(proc, derivationInput);
     if (SEC_RESULT_SUCCESS != export_res) {
         SEC_LOG_ERROR("_provision_export_keys failed");
@@ -2640,7 +2641,7 @@ static size_t bytesToProcessToRollover(uint64_t ctr, size_t sub_block_offset, si
     maxBlocksToProcess -= 1;
 
     //add the rest up to rollover
-    uint64_t inputBlocks = inputLen/SEC_AES_BLOCK_SIZE + (inputLen%SEC_AES_BLOCK_SIZE > 0) ? 1 : 0;
+    uint64_t inputBlocks = inputLen/SEC_AES_BLOCK_SIZE + (inputLen%SEC_AES_BLOCK_SIZE > 0 ? 1 : 0);
     uint64_t blocksToProcess = SEC_MIN(inputBlocks, maxBlocksToProcess);
     bytesToProcess += SEC_MIN(inputLen, (size_t) blocksToProcess * SEC_AES_BLOCK_SIZE);
 
@@ -5496,7 +5497,8 @@ Sec_Result SecCodeIntegrity_SecureBootEnabled(void)
 }
 
 Sec_Result SecSVP_SetTime(time_t time) {
-    if (0 != stime(&time)) {
+   struct timespec ts = {time, 0};
+    if (0 != clock_settime(CLOCK_REALTIME, &ts)) {
         SEC_LOG_ERROR("stime failed");
         return SEC_RESULT_FAILURE;
     }
@@ -5679,7 +5681,7 @@ Sec_Result SecProcessor_GetInfo(Sec_ProcessorHandle* secProcHandle,
         return SEC_RESULT_INVALID_PARAMETERS;
 
     Sec_Memset(secProcInfo, 0x00, sizeof(Sec_ProcessorInfo));
-    strncpy((char *)secProcInfo->version, SEC_API_VERSION, strlen(SEC_API_VERSION));
+    strncpy((char *)secProcInfo->version, SEC_API_VERSION, strlen(SEC_API_VERSION) + 1);
 
     return SEC_RESULT_SUCCESS;
 }

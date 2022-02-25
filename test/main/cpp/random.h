@@ -17,4 +17,11 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.25"
+#ifndef TEST_RANDOM_H_
+#define TEST_RANDOM_H_
+
+#include "sec_security.h"
+
+Sec_Result testRandom(Sec_RandomAlgorithm alg, SEC_SIZE size);
+
+#endif
