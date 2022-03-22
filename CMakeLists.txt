@@ -1,7 +1,7 @@
 # If not stated otherwise in this file or this component's Licenses.txt file the
 # following copyright and licenses apply:
 #
-# Copyright 2019 RDK Management
+# Copyright 2022 RDK Management
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -96,63 +96,6 @@ target_link_libraries(sec_api
         PRIVATE
         ${OPENSSL_CRYPTO_LIBRARY}
         )
-
-add_executable(sec_api_test
-        test/main/cpp/bundle.cpp
-        test/main/cpp/bundle.h
-        test/main/cpp/cert.cpp
-        test/main/cpp/cert.h
-        test/main/cpp/cipher.cpp
-        test/main/cpp/cipher.h
-        test/main/cpp/concurrent.cpp
-        test/main/cpp/concurrent.h
-        test/main/cpp/digest.cpp
-        test/main/cpp/digest.h
-        test/main/cpp/exchange.cpp
-        test/main/cpp/exchange.h
-        test/main/cpp/jtype.cpp
-        test/main/cpp/jtype.h
-        test/main/cpp/key.cpp
-        test/main/cpp/key.h
-        test/main/cpp/keyctrl.cpp
-        test/main/cpp/keyctrl.h
-        test/main/cpp/mac.cpp
-        test/main/cpp/mac.h
-        test/main/cpp/processor.cpp
-        test/main/cpp/processor.h
-        test/main/cpp/random.cpp
-        test/main/cpp/random.h
-        test/main/cpp/sec_api_utest_main.cpp
-        test/main/cpp/sec_api_utest_main.h
-        test/main/cpp/sign.cpp
-        test/main/cpp/sign.h
-        test/main/cpp/svp.cpp
-        test/main/cpp/svp.h
-        test/main/cpp/test_creds_clear.cpp
-        test/main/cpp/test_ctx.cpp
-        test/main/cpp/wrapped.cpp
-        test/main/cpp/wrapped.h
-        test/main/headers/test_creds.h
-        test/main/headers/test_ctx.h
-        test/openssl/cpp/test_creds_soc.cpp
-        )
-
-target_include_directories(sec_api_test
-        PRIVATE
-        src
-        test/main/cpp
-        test/main/headers
-        )
-
-target_link_libraries(sec_api_test
-        PRIVATE
-        pthread
-        sec_api
-        ${OPENSSL_CRYPTO_LIBRARY}
-        ${YAJL_LIBRARY}
-        )
-
-add_test(sec_api_test sec_api_utest_main)
 
 # 'make install' to the correct locations (provided by GNUInstallDirs).
 install(TARGETS sec_api

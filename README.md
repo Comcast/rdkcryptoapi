@@ -2,8 +2,7 @@
 
 ## Summary
 
-RDKCryptoAPI Contains cryptographic APIs used in the RDK Software Stack and an OpenSSL reference implementation.
-
+RDKCryptoAPI contains cryptographic APIs used in the RDK Software Stack and an OpenSSL reference implementation.
 
 ## Building
 
@@ -16,11 +15,9 @@ YAJL - include -DYAJL_ROOT=<directory> if not found
 OPENSSL - include -DOPENSSL_ROOT_DIR=<directory> if not found
 Add -DCMAKE_INSTALL_PREFIX=<directory> to install to a non-standard install directory.
 
-
 ```
 cmake -S . -B cmake-build
 ```
-
 
 ### Build
 
@@ -40,8 +37,6 @@ Run unit test suite
 cmake-build/sec_api_test
 ```
 
-
-
 ### Install
 
 To install RDKCryptoAPI, run a cmake install
@@ -53,3 +48,7 @@ cmake --install cmake-build
 This copies the include files, the library, libsec_api.(so/dll/dylib) containing the RDKCryptoAPI reference code (the
 extension .so/.dll/.dylib created depends on which platform you are building on), and the test application,
 sec_api_test, to their appropriate locations on the system.
+
+## Dependencies
+
+RDKCryptoAPI depends on OpenSSL 1.0.2 or 1.1.1 and YAJL version 1 or 2.
