@@ -163,8 +163,8 @@ static Asn1KCAttribute_t *SecAsn1KC_AllocAttr(att_choice c)
                 Asn1KCAttribute_t_free(ptr);
                 return NULL;
             }
-            break;
             ptr->value->type = ASN1KCATTRIBUTE_T_CHOICE_BITSTRING;
+            break;
         case asn1_octet_string:
             ptr->value->c.octetstring = ASN1_OCTET_STRING_new();
             if(ptr->value->c.octetstring == NULL)
@@ -810,6 +810,11 @@ Sec_Result SecAsn1KC_Encode(Sec_Asn1KC *kc, SEC_BYTE *buf, SEC_SIZE buf_len, SEC
     {
         *written = der_len;
     }
+    else if (der_len < 0)
+    {
+        SEC_LOG_ERROR("der_encode_to_buffer failed");
+        return SEC_RESULT_FAILURE;
+    }
     else if (der_len > buf_len)
     {
         SEC_LOG_ERROR("der_encode_to_buffer invalide buffer length, der_len = %d, buf_len = %d", der_len, buf_len);
@@ -818,12 +823,6 @@ Sec_Result SecAsn1KC_Encode(Sec_Asn1KC *kc, SEC_BYTE *buf, SEC_SIZE buf_len, SEC
     else
     {
       *written = i2d_Sec_Asn1KC(kc, &buf);
-    }
-
-    if (*written < 0)
-    {
-        SEC_LOG_ERROR("der_encode_to_buffer failed");
-        return SEC_RESULT_FAILURE;
     }
 
     return SEC_RESULT_SUCCESS;
@@ -836,9 +835,13 @@ Sec_Asn1KC *SecAsn1KC_Decode(SEC_BYTE *buf, SEC_SIZE buf_len)
 
     if (buf_len > INT_MAX)
     {
-        SEC_LOG_ERROR("buf length rollover");
-        return NULL;
+        if (buf_len > LONG_MAX)
+        {
+             SEC_LOG_ERROR("buf length rollover");
+             return NULL;
+        }
     }
+
     ret = d2i_Sec_Asn1KC(NULL, &c_buf, (long)buf_len);
     return ret;
 }
