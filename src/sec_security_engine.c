@@ -266,6 +266,7 @@ static void ENGINE_load_securityapi(void)
 #if OPENSSL_VERSION_NUMBER < 0x10100000L
             || !ENGINE_set_RSA(engine, &g_sec_openssl_rsamethod)
 #else
+            || !ENGINE_set_RSA(engine, _GetRSAMethod())
 #endif
             )
     {

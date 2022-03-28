@@ -17,4 +17,4 @@
  * limitations under the License.
  */
 
-#define SEC_API_VERSION "2.3.2.2"
+#define SEC_API_VERSION "2.3.2.25"

@@ -414,6 +414,11 @@ done:
 Sec_Result _Pubops_VerifyWithPubEcc(Sec_ECCRawPublicKey *pub_key, Sec_SignatureAlgorithm alg, SEC_BYTE *digest, SEC_SIZE digest_len, SEC_BYTE *sig, SEC_SIZE sig_len) {
 	EC_KEY *ec_key = _SecUtils_ECCFromPubBinary(pub_key);
 	Sec_Result res = SEC_RESULT_FAILURE;
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    ECDSA_SIG* esig = NULL;
+    BIGNUM* esigr = NULL;
+    BIGNUM* esigs = NULL;
+#endif
 
 	if (NULL == ec_key)
 	{
@@ -426,6 +431,37 @@ Sec_Result _Pubops_VerifyWithPubEcc(Sec_ECCRawPublicKey *pub_key, Sec_SignatureA
 		goto done;
 	}
 
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    esig = ECDSA_SIG_new();
+    if (esig == NULL) {
+        SEC_LOG_ERROR("ECDSA_SIG_new failed");
+        goto done;
+    }
+
+    esigr = BN_new();
+    if (esigr == NULL) {
+        SEC_LOG_ERROR("BN_new failed");
+        goto done;
+    }
+
+    esigs = BN_new();
+    if (esigs == NULL) {
+        SEC_LOG_ERROR("BN_new failed");
+        goto done;
+    }
+
+    BN_bin2bn(&sig[0], SEC_ECC_NISTP256_KEY_LEN, esigr);
+    BN_bin2bn(&sig[SEC_ECC_NISTP256_KEY_LEN], SEC_ECC_NISTP256_KEY_LEN, esigs);
+
+    if (!ECDSA_SIG_set0(esig, esigr, esigs)) {
+        SEC_LOG_ERROR("ECDSA_SIG_set0 failed");
+        goto done;
+    }
+    esigr = NULL;
+    esigs = NULL;
+
+    int openssl_res = ECDSA_do_verify(digest, digest_len, esig, ec_key);
+#else
     ECDSA_SIG esig;
     esig.r = BN_new();
     esig.s = BN_new();
@@ -435,6 +471,7 @@ Sec_Result _Pubops_VerifyWithPubEcc(Sec_ECCRawPublicKey *pub_key, Sec_SignatureA
     int openssl_res = ECDSA_do_verify(digest, digest_len, &esig, ec_key);
     BN_free(esig.r);
     BN_free(esig.s);
+#endif
 
     if (1 != openssl_res)
     {
@@ -450,6 +487,11 @@ Sec_Result _Pubops_VerifyWithPubEcc(Sec_ECCRawPublicKey *pub_key, Sec_SignatureA
 	res = SEC_RESULT_SUCCESS;
 
 done:
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    BN_free(esigr);
+    BN_free(esigs);
+    ECDSA_SIG_free(esig);
+#endif
     SEC_ECC_FREE(ec_key);
 
     return res;
@@ -636,8 +678,16 @@ Sec_Result _Pubops_ExtractRSAPubFromX509Der(SEC_BYTE *cert, SEC_SIZE cert_len, S
     }
 
     Sec_Uint32ToBEBytes(RSA_size(rsa), pub->modulus_len_be);
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    const BIGNUM* n;
+    const BIGNUM* e;
+    RSA_get0_key(rsa, &n, &e, NULL);
+    _SecUtils_BigNumToBuffer(n, pub->n, Sec_BEBytesToUint32(pub->modulus_len_be));
+    _SecUtils_BigNumToBuffer(e, pub->e, 4);
+#else
     _SecUtils_BigNumToBuffer(rsa->n, pub->n, Sec_BEBytesToUint32(pub->modulus_len_be));
     _SecUtils_BigNumToBuffer(rsa->e, pub->e, 4);
+#endif
 
     res = SEC_RESULT_SUCCESS;
 done:
@@ -814,8 +864,16 @@ Sec_Result _Pubops_ExtractRSAPubFromPUBKEYDer(SEC_BYTE *cert, SEC_SIZE cert_len,
 	}
 
     Sec_Uint32ToBEBytes(RSA_size(rsa), pub->modulus_len_be);
+#if OPENSSL_VERSION_NUMBER > 0x10100000L
+    const BIGNUM* n;
+    const BIGNUM* e;
+    RSA_get0_key(rsa, &n, &e, NULL);
+    _SecUtils_BigNumToBuffer(n, pub->n, Sec_BEBytesToUint32(pub->modulus_len_be));
+    _SecUtils_BigNumToBuffer(e, pub->e, 4);
+#else
     _SecUtils_BigNumToBuffer(rsa->n, pub->n, Sec_BEBytesToUint32(pub->modulus_len_be));
     _SecUtils_BigNumToBuffer(rsa->e, pub->e, 4);
+#endif
 
     res = SEC_RESULT_SUCCESS;
 
@@ -886,7 +944,7 @@ Sec_Result _Pubops_Random(SEC_BYTE* out, SEC_SIZE out_len) {
 }
 
 Sec_Result _Pubops_RandomPrng(SEC_BYTE* out, SEC_SIZE out_len) {
-	if (1 != RAND_pseudo_bytes(out, out_len)) {
+	if (1 != RAND_bytes(out, out_len)) {
 		SEC_LOG_ERROR();
 		return SEC_RESULT_FAILURE;
 	}

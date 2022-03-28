@@ -62,9 +62,13 @@ typedef struct {
 
 typedef STACK_OF(Asn1KCAttribute_t) Sec_Asn1KC;
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 #define sk_Asn1KCAttribute_t_num(st)        sk_num(CHECKED_STACK_OF(Asn1KCAttribute_t, st))
 #define sk_Asn1KCAttribute_t_value(st, i)   ((Asn1KCAttribute_t *)sk_value(CHECKED_STACK_OF(Asn1KCAttribute_t, st), i))
 #define sk_Asn1KCAttribute_t_push(st, val)  sk_push(CHECKED_STACK_OF(Asn1KCAttribute_t, st), CHECKED_PTR_OF(Asn1KCAttribute_t, val))
+#else
+DEFINE_STACK_OF(Asn1KCAttribute_t);
+#endif
 
 Sec_Asn1KC *SecAsn1KC_Alloc();
 void SecAsn1KC_Free(Sec_Asn1KC *kc);

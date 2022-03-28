@@ -51,6 +51,7 @@ IMPLEMENT_ASN1_FUNCTIONS(Sec_Asn1KC)
 IMPLEMENT_ASN1_PRINT_FUNCTION(Sec_Asn1KC)  //PRINTF
 //Implements Sec_Asn1KC_new, Sec_Asn1KC_free, d2i_Sec_Asn1KC i2d_Sec_Asn1KC
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
 static Sec_Result getBE_ASN1_INTEGER(SEC_BYTE* res, const ASN1_INTEGER *ai, SEC_SIZE size, SEC_BOOL signd)
 {
     BIGNUM *bn = NULL;
@@ -93,6 +94,7 @@ static Sec_Result getBE_ASN1_INTEGER(SEC_BYTE* res, const ASN1_INTEGER *ai, SEC_
     BN_free(bn);
     return SEC_RESULT_SUCCESS;
 }
+#endif
 
 
 static Sec_Result setBE_ASN1_INTEGER(ASN1_INTEGER *st, SEC_BYTE* be_value, SEC_SIZE size)
@@ -233,8 +235,13 @@ static Asn1KCAttribute_t *SecAsn1KC_GetAttr(Sec_Asn1KC *kc, const char *key)
         at = sk_Asn1KCAttribute_t_value(kc, i);
         if (at != NULL &&
             strlen(key) == ASN1_STRING_length(at->name) &&
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
             ASN1_STRING_data(at->name) != NULL &&
             0 == Sec_Memcmp(key, ASN1_STRING_data(at->name), ASN1_STRING_length(at->name)))
+#else
+            ASN1_STRING_get0_data(at->name) != NULL &&
+            0 == Sec_Memcmp(key, ASN1_STRING_get0_data(at->name), ASN1_STRING_length(at->name)))
+#endif
         {
             return at;
         }
@@ -266,10 +273,18 @@ Sec_Result SecAsn1KC_GetAttrLong(Sec_Asn1KC *kc, const char *key, long *val)
         return SEC_RESULT_FAILURE;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     // Openssl 1.0.9 has support for signed long types
     // With Openssl 1.1.x new applications should use ASN1_INTEGER_get_int64()
     // instead
     *val = (long)ASN1_INTEGER_get(attr->value->c.integer);
+#else
+    if(ASN1_INTEGER_get_int64((int64_t*)val, attr->value->c.integer) != 1)
+    {
+        SEC_LOG_ERROR("failed to get Long value from asn1 struct");
+        return SEC_RESULT_FAILURE;
+    }
+#endif
 
     return SEC_RESULT_SUCCESS;
 }
@@ -277,7 +292,9 @@ Sec_Result SecAsn1KC_GetAttrLong(Sec_Asn1KC *kc, const char *key, long *val)
 Sec_Result SecAsn1KC_GetAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t *val)
 {
     Asn1KCAttribute_t *attr = NULL;
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SEC_BYTE val_buf[sizeof(int64_t)];
+#endif
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -293,6 +310,7 @@ Sec_Result SecAsn1KC_GetAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t *val)
         return SEC_RESULT_FAILURE;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     //With openssl 1.1.x support you can use ASN1_INTEGER_get_int64() in place
     //of getBE_ASN1_INTEGER()
     if(getBE_ASN1_INTEGER(val_buf, attr->value->c.integer, sizeof(val),
@@ -304,6 +322,13 @@ Sec_Result SecAsn1KC_GetAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t *val)
 
     //val_buf is an 8 byte buffer that has sign bits extended if needed.
     *val = (int64_t)Sec_BEBytesToUint64(val_buf);
+#else
+    if(ASN1_INTEGER_get_int64(val, attr->value->c.integer) != 1)
+    {
+        SEC_LOG_ERROR("failed to get Long value from asn1 struct");
+        return SEC_RESULT_FAILURE;
+    }
+#endif
 
     return SEC_RESULT_SUCCESS;
 }
@@ -311,7 +336,9 @@ Sec_Result SecAsn1KC_GetAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t *val)
 Sec_Result SecAsn1KC_GetAttrUlong(Sec_Asn1KC *kc, const char *key, unsigned long *val)
 {
     Asn1KCAttribute_t *attr = NULL;
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SEC_BYTE val_buf[sizeof(unsigned long)];
+#endif
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -326,6 +353,7 @@ Sec_Result SecAsn1KC_GetAttrUlong(Sec_Asn1KC *kc, const char *key, unsigned long
         return SEC_RESULT_FAILURE;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     //With openssl 1.1.x support you can use ASN1_INTEGER_get_uint64() in place
     //of getBE_ASN1_INTEGER()
     if(getBE_ASN1_INTEGER(val_buf, attr->value->c.integer, sizeof(val),
@@ -344,13 +372,22 @@ Sec_Result SecAsn1KC_GetAttrUlong(Sec_Asn1KC *kc, const char *key, unsigned long
         *val = (unsigned long)Sec_BEBytesToUint64(val_buf);
     }
 
+#else
+    if(ASN1_INTEGER_get_uint64((uint64_t*)val, attr->value->c.integer) != 1)
+    {
+        SEC_LOG_ERROR("failed to get Long value from asn1 struct");
+        return SEC_RESULT_FAILURE;
+    }
+#endif
     return SEC_RESULT_SUCCESS;
 }
 
 Sec_Result SecAsn1KC_GetAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t *val)
 {
     Asn1KCAttribute_t *attr = NULL;
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SEC_BYTE val_buf[sizeof(uint64_t)];
+#endif
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -365,6 +402,7 @@ Sec_Result SecAsn1KC_GetAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t *va
         return SEC_RESULT_FAILURE;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     //With openssl 1.1.x support you can use ASN1_INTEGER_get_uint64() in place
     //of getBE_ASN1_INTEGER()
     if(getBE_ASN1_INTEGER(val_buf, attr->value->c.integer, sizeof(uint64_t),
@@ -375,6 +413,13 @@ Sec_Result SecAsn1KC_GetAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t *va
     }
 
     *val = Sec_BEBytesToUint64(val_buf);
+#else
+    if(ASN1_INTEGER_get_uint64(val, attr->value->c.integer) != 1)
+    {
+        SEC_LOG_ERROR("failed to get Long value from asn1 struct");
+        return SEC_RESULT_FAILURE;
+    }
+#endif
 
     return SEC_RESULT_SUCCESS;
 }
@@ -382,7 +427,7 @@ Sec_Result SecAsn1KC_GetAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t *va
 Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *buffer, SEC_SIZE buffer_len, SEC_SIZE *written)
 {
     Asn1KCAttribute_t *attr = NULL;
-    unsigned char *str_data = NULL;
+    const unsigned char *str_data = NULL;
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -407,7 +452,11 @@ Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *bu
             return SEC_RESULT_FAILURE;
         }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
         str_data = ASN1_STRING_data(attr->value->c.octetstring);
+#else
+        str_data = ASN1_STRING_get0_data(attr->value->c.octetstring);
+#endif
         if(str_data == NULL)
         {
             SEC_LOG_ERROR("Call to ASN1_STRING_data failed");
@@ -423,7 +472,7 @@ Sec_Result SecAsn1KC_GetAttrBuffer(Sec_Asn1KC *kc, const char *key, SEC_BYTE *bu
 Sec_Result SecAsn1KC_GetAttrString(Sec_Asn1KC *kc, const char *key, char *buffer, SEC_SIZE buffer_len, SEC_SIZE *written)
 {
     Asn1KCAttribute_t *attr = NULL;
-    unsigned char *str_data = NULL;
+    const unsigned char *str_data = NULL;
 
     attr = SecAsn1KC_GetAttr(kc, key);
     if (attr == NULL)
@@ -447,7 +496,11 @@ Sec_Result SecAsn1KC_GetAttrString(Sec_Asn1KC *kc, const char *key, char *buffer
             return SEC_RESULT_FAILURE;
         }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
         str_data = ASN1_STRING_data(attr->value->c.octetstring);
+#else
+        str_data = ASN1_STRING_get0_data(attr->value->c.octetstring);
+#endif
         if(str_data == NULL)
         {
             SEC_LOG_ERROR("Call to ASN1_STRING_data failed");
@@ -527,7 +580,9 @@ Sec_Result SecAsn1KC_AddAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t val)
 {
     Sec_Result res = SEC_RESULT_FAILURE;
     Asn1KCAttribute_t *ptr = SecAsn1KC_AllocAttr(asn1_integer);
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SEC_BYTE be_val[sizeof(val)];
+#endif
 
     if (ptr == NULL)
     {
@@ -541,6 +596,7 @@ Sec_Result SecAsn1KC_AddAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t val)
         goto done;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     Sec_Uint64ToBEBytes((uint64_t)val, be_val);
     if(setBE_ASN1_INTEGER(ptr->value->c.integer, be_val, sizeof(val)) !=
             SEC_RESULT_SUCCESS)
@@ -548,6 +604,13 @@ Sec_Result SecAsn1KC_AddAttrInt64(Sec_Asn1KC *kc, const char *key, int64_t val)
         SEC_LOG_ERROR("setBE_ASN1_INTEGER failed");
         goto done;
     }
+#else
+    if (0 == ASN1_INTEGER_set_int64(ptr->value->c.integer, val))
+    {
+        SEC_LOG_ERROR("ASN1_INTEGER_set_int64 failed");
+        goto done;
+    }
+#endif
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttr(kc, ptr))
     {
@@ -616,7 +679,9 @@ Sec_Result SecAsn1KC_AddAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t val
 {
     Sec_Result res = SEC_RESULT_FAILURE;
     Asn1KCAttribute_t *ptr = SecAsn1KC_AllocAttr(asn1_integer);
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     SEC_BYTE be_val[sizeof(val)];
+#endif
 
     if (ptr == NULL)
     {
@@ -630,6 +695,7 @@ Sec_Result SecAsn1KC_AddAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t val
         goto done;
     }
 
+#if OPENSSL_VERSION_NUMBER < 0x10100000L
     Sec_Uint64ToBEBytes(val, be_val);
     if(setBE_ASN1_INTEGER(ptr->value->c.integer, be_val, sizeof(val)) !=
             SEC_RESULT_SUCCESS)
@@ -637,6 +703,13 @@ Sec_Result SecAsn1KC_AddAttrUint64(Sec_Asn1KC *kc, const char *key, uint64_t val
         SEC_LOG_ERROR("setBE_ASN1_INTEGER failed");
         goto done;
     }
+#else
+    if (0 == ASN1_INTEGER_set_uint64(ptr->value->c.integer, val))
+    {
+        SEC_LOG_ERROR("ASN1_INTEGER_set_uint64 failed");
+        goto done;
+    }
+#endif
 
     if (SEC_RESULT_SUCCESS != SecAsn1KC_AddAttr(kc, ptr))
     {
@@ -760,7 +833,7 @@ Sec_Asn1KC *SecAsn1KC_Decode(SEC_BYTE *buf, SEC_SIZE buf_len)
     const unsigned char *c_buf = buf;
     Sec_Asn1KC *ret = NULL;
 
-    if (UINT32_MAX > LONG_MAX)
+    if (buf_len > INT_MAX)
     {
         if (buf_len > LONG_MAX)
         {
